@@ -439,29 +439,18 @@ function isNote(node) {
 
 function renderLists() {
   renderTree();
-  if (!state.folder) {
-    ui["note-list"].replaceChildren();
-    ui["list-heading"].textContent = "Notes";
-    ui["list-detail"].textContent = "";
-    ui.more.hidden = true;
+  ui["note-list"].replaceChildren();
+  ui["search-results"].hidden = !state.project || !state.query;
+  if (ui["search-results"].hidden) {
     updateControls();
     return;
   }
-  const notes = (state.query ? state.results : (
-    state.folder === state.tree ? allNotes(state.tree) : state.folder.children
-  )).filter(isNote);
-  if (!state.query) notes.sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name));
-  ui["list-heading"].textContent = state.query ? "Search results" : (
-    state.folder === state.tree ? projectLabel(state.project) : state.folder.name
-  );
-  ui["list-detail"].textContent = state.query
-    ? `“${state.query}” in ${projectLabel(state.project)}`
-    : `${notes.length} ${notes.length === 1 ? "note" : "notes"}`;
-  ui["note-list"].replaceChildren();
+  const notes = state.results.filter(isNote);
+  ui["list-detail"].textContent = `“${state.query}” in ${projectLabel(state.project)}`;
   if (!notes.length) {
     const empty = document.createElement("li");
     empty.className = "no-results";
-    empty.textContent = state.query ? "No matching notes." : "No Markdown notes here yet.";
+    empty.textContent = "No matching notes.";
     ui["note-list"].append(empty);
   }
   for (const note of notes) {
@@ -487,7 +476,7 @@ function renderLists() {
     item.append(button);
     ui["note-list"].append(item);
   }
-  ui.more.hidden = !state.query || !state.hasMore;
+  ui.more.hidden = !state.hasMore;
   updateControls();
 }
 
@@ -958,6 +947,9 @@ async function flushAutosave() {
 ui["search-form"].addEventListener("submit", event => {
   event.preventDefault();
   if (state.project) void run(() => search(ui.search.value.trim()));
+});
+ui.search.addEventListener("input", () => {
+  if (!ui.search.value && state.query) void search("");
 });
 ui.more.addEventListener("click", () => void run(() => search(state.query, state.page + 1)));
 ui.refresh.addEventListener("click", () => void run(async () => {
