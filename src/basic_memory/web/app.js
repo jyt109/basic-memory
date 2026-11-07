@@ -310,6 +310,21 @@ function projectLabel(project) {
   return state.projectLabels[project.external_id] || project.name;
 }
 
+function cancelInlineName(draft) {
+  if (state.nameDraft !== draft) return;
+  state.nameDraft = null;
+  renderTree();
+  updateControls();
+}
+
+document.addEventListener("click", event => {
+  const draft = state.nameDraft;
+  const renaming = draft?.kind === "note" ? draft.note : draft?.project;
+  if (!renaming || state.busy || event.target.closest(".inline-name-field")) return;
+  // Let the clicked control finish before replacing any sidebar rows.
+  setTimeout(() => cancelInlineName(draft), 0);
+}, { capture: true });
+
 function inlineNameField() {
   const draft = state.nameDraft;
   const noun = draft.kind;
@@ -329,16 +344,11 @@ function inlineNameField() {
   cancel.type = "button";
   cancel.textContent = "×";
   cancel.setAttribute("aria-label", `Cancel ${noun} name`);
-  function cancelName() {
-    state.nameDraft = null;
-    renderTree();
-    updateControls();
-  }
-  cancel.addEventListener("click", cancelName);
+  cancel.addEventListener("click", () => cancelInlineName(draft));
   input.addEventListener("keydown", event => {
     if (event.key === "Escape") {
       event.preventDefault();
-      cancelName();
+      cancelInlineName(draft);
     }
   });
   const confirm = document.createElement("button");
