@@ -19,12 +19,6 @@
         <input type="search" id="search" placeholder="Search…" maxlength="4000">
         <button type="submit" aria-label="Search">Go</button>
       </form>
-      <section id="search-results" aria-labelledby="list-heading" hidden>
-        <h2 id="list-heading" class="section-label">Search results</h2>
-        <div id="list-detail"></div>
-        <ul id="note-list"></ul>
-        <button id="more" hidden>More results</button>
-      </section>
       <div id="projects-toolbar" class="tree-toolbar">
         <h2 class="section-label">Projects</h2>
         <div class="tree-toolbar-actions">
@@ -35,6 +29,13 @@
       <nav id="folders" aria-label="Project tree"></nav>
       <button id="refresh" class="refresh">Refresh workspace</button>
     </aside>
+    <section class="notes" aria-labelledby="list-heading">
+      <header class="list-header">
+        <div><h2 id="list-heading">Notes</h2><div id="list-detail"></div></div>
+      </header>
+      <ul id="note-list"></ul>
+      <button id="more" hidden>More results</button>
+    </section>
     <main class="editor">
       <header class="editor-header">
         <span id="note-path">Workspace</span>
