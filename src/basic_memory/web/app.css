@@ -48,8 +48,8 @@ button:disabled { cursor: default; opacity: .55; }
 .actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 6px; }
 .document { max-width: 780px; margin: 0 auto; padding: clamp(22px, 5vw, 64px); overflow-wrap: anywhere; }
 #empty p { color: var(--muted); margin-top: 8px; }
-#notice { margin: 14px 17px 0; padding: 9px 12px; border-radius: 6px; background: #eef3ed; }
-#notice.error { background: #fff0e6; color: #7b3318; }
+.notice { margin: 14px 17px 0; padding: 9px 12px; border-radius: 6px; background: #eef3ed; }
+.notice.error { background: #fff0e6; color: #7b3318; }
 .preview { line-height: 1.72; }
 .preview :is(h1, h2, h3, p, ul, ol, blockquote, pre, table) { margin: 0 0 1rem; }
 .preview h1, #empty h1 { font-size: clamp(26px, 3vw, 36px); line-height: 1.18; letter-spacing: -.025em; }
@@ -69,3 +69,20 @@ textarea { min-height: 52dvh; padding: 13px; resize: vertical; border: 1px solid
   .editor-header { position: static; }
   .list-header { flex-wrap: wrap; }
 }
+
+#manage-projects { width: 100%; margin-top: 7px; text-align: left; }
+#projects-dialog { width: min(620px, calc(100% - 24px)); max-height: 88dvh; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: inherit; box-shadow: 0 18px 70px #2224; }
+#projects-dialog::backdrop { background: #232a2370; }
+.projects-header { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 20px; border-bottom: 1px solid var(--line); }
+.projects-header h1 { font-size: 23px; }
+.projects-header p, #folder-help, #add-project label span, .project-path { color: var(--muted); }
+#project-list { margin: 0; padding: 0 20px; list-style: none; }
+.project-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.project-details { min-width: 0; overflow-wrap: anywhere; }
+.project-path { font-size: 12px; }
+.project-default { margin-left: 8px; color: #345940; font-size: 11px; }
+#add-project { display: grid; gap: 6px; padding: 20px; }
+#add-project h2 { font-size: 16px; margin-bottom: 4px; }
+#add-project label { font-weight: 620; margin-top: 4px; }
+#add-project label span, #folder-help { font-size: 12px; font-weight: 400; }
+#add-project button { justify-self: start; margin-top: 8px; }

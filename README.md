@@ -187,7 +187,8 @@ uv run --no-sync basic-memory web
 
 Open [127.0.0.1:8765](http://127.0.0.1:8765) to browse local projects,
 search notes, follow wikilinks, and edit the same Markdown files your MCP
-client uses. The server listens only on the loopback interface. Pass
+client uses. Choose **Manage projects** to add a folder or set the default project.
+The server listens only on the loopback interface. Pass
 `--port` to choose another local port.
 
 ## Works with the tools you already use

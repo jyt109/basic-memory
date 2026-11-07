@@ -52,21 +52,28 @@ function canLeave() {
 }
 
 function showNotice(message = "", isError = false) {
-  ui.notice.hidden = !message;
-  ui.notice.textContent = message;
-  ui.notice.classList.toggle("error", isError);
+  const notice = ui["projects-dialog"].open ? ui["project-notice"] : ui.notice;
+  notice.hidden = !message;
+  notice.textContent = message;
+  notice.classList.toggle("error", isError);
 }
 
 function updateControls() {
   for (const control of [
-    ui.project, ui.refresh, ui.search, ui.cancel, ui.reload, ui.mode, ui.more, ui.title, ui.markdown,
-    ui["search-form"].querySelector("button"),
+    ui.cancel, ui.reload, ui.mode, ui.more, ui.title, ui.markdown,
+    ui["manage-projects"], ui["close-projects"], ui["project-name"], ui["project-folder"],
+    ui["add-project"].querySelector("button"),
+    ...ui["project-list"].querySelectorAll("button"),
     ...ui.folders.querySelectorAll("button"),
     ...ui["note-list"].querySelectorAll("button"),
   ]) {
     control.disabled = state.busy;
   }
-  ui["new-note"].disabled = state.busy || !state.project;
+  for (const control of [
+    ui.project, ui.refresh, ui.search, ui["new-note"], ui["search-form"].querySelector("button"),
+  ]) {
+    control.disabled = state.busy || !state.project;
+  }
   ui.save.disabled = state.busy || !dirty() || (!state.note && !ui.title.value.trim());
 }
 
@@ -345,7 +352,7 @@ ui.preview.addEventListener("click", event => {
     });
     const project = state.projects.find(entry => entry.external_id === target.target_project_external_id);
     if (!project || !isNote(target)) throw new Error("The link does not point to a local Markdown note.");
-    if (project === state.project) await openNote(target.external_id);
+    if (project.external_id === state.project.external_id) await openNote(target.external_id);
     else await selectProject(project, target.external_id);
   });
 });
@@ -377,21 +384,136 @@ document.addEventListener("keydown", event => {
   }
 });
 
-void run(async () => {
+async function loadProjects() {
   const { projects } = await request("/v2/projects/");
   state.projects = projects;
-  for (const project of projects) ui.project.add(new Option(project.name, project.external_id));
-  if (!projects.length) {
-    ui.refresh.hidden = true;
-    showNotice("Add a local project with basic-memory project add, then reload this page.");
+  const current = projects.find(entry => entry.external_id === state.project?.external_id);
+  ui.project.replaceChildren(...projects.map(project => new Option(project.name, project.external_id)));
+  ui.project.value = current?.external_id ?? "";
+  if (current) state.project = current;
+  renderProjects();
+}
+
+function projectButton(label, project, action) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.setAttribute("aria-label", `${label} ${project.name}`);
+  button.addEventListener("click", action);
+  return button;
+}
+
+function renderProjects() {
+  ui["project-list"].replaceChildren();
+  for (const project of state.projects) {
+    const row = document.createElement("li");
+    row.className = "project-row";
+    const details = document.createElement("div");
+    details.className = "project-details";
+    const name = document.createElement("strong");
+    name.textContent = project.name;
+    details.append(name);
+    if (project.is_default) {
+      const badge = document.createElement("span");
+      badge.className = "project-default";
+      badge.textContent = "Default";
+      details.append(badge);
+    }
+    const path = document.createElement("p");
+    path.className = "project-path";
+    path.textContent = project.path;
+    details.append(path);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.append(projectButton("Open", project, () => {
+      if (project.external_id === state.project?.external_id) {
+        ui["projects-dialog"].close();
+      } else if (canLeave()) {
+        void run(async () => {
+          await selectProject(project);
+          ui["projects-dialog"].close();
+        });
+      }
+    }));
+    if (!project.is_default) {
+      actions.append(projectButton("Set default", project, () => void run(async () => {
+        await request(projectUrl(project) + "/default", "PUT");
+        await loadProjects();
+        showNotice(`${project.name} is now the default project.`);
+      })));
+      actions.append(projectButton("Remove", project, () => {
+        const isCurrent = project.external_id === state.project?.external_id;
+        if (isCurrent && !canLeave()) return;
+        if (!window.confirm(`Remove ${project.name} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
+        void run(async () => {
+          await request(projectUrl(project), "DELETE");
+          await loadProjects();
+          if (isCurrent) await selectProject(state.projects.find(entry => entry.is_default) ?? state.projects[0]);
+          showNotice(`${project.name} was removed. Its Markdown files were kept.`);
+        });
+      }));
+    }
+    row.append(details, actions);
+    ui["project-list"].append(row);
+  }
+  updateControls();
+}
+
+function suggestedFolder(name) {
+  const folder = name.replace(/[<>:"/\\|?*]/g, "-").replace(/^[.]+/, "");
+  return `~/basic-memory-projects/${folder || "New project"}`;
+}
+
+ui["project-name"].addEventListener("input", () => {
+  ui["project-folder"].placeholder = suggestedFolder(ui["project-name"].value.trim());
+});
+ui["manage-projects"].addEventListener("click", () => {
+  ui["projects-dialog"].showModal();
+  void run(loadProjects);
+});
+ui["close-projects"].addEventListener("click", () => ui["projects-dialog"].close());
+ui["projects-dialog"].addEventListener("cancel", event => {
+  if (state.busy) event.preventDefault();
+});
+ui["add-project"].addEventListener("submit", event => {
+  event.preventDefault();
+  const name = ui["project-name"].value.trim();
+  const path = ui["project-folder"].value.trim() || suggestedFolder(name);
+  if (!name || !/^(?:~?\/|[a-z]:[\\/])/i.test(path)) {
+    showNotice("Enter a project name and a full local folder path.", true);
     return;
   }
-  ui.project.addEventListener("change", () => {
-    const project = projects.find(entry => entry.external_id === ui.project.value);
-    ui.project.value = state.project?.external_id ?? "";
-    if (project && canLeave()) void run(() => selectProject(project));
+  if (!canLeave()) return;
+  void run(async () => {
+    const { new_project: project } = await request("/v2/projects/", "POST", {
+      name, path, set_default: state.projects.length === 0,
+    });
+    ui["add-project"].reset();
+    ui["project-folder"].placeholder = suggestedFolder("");
+    await loadProjects();
+    showNotice(`Indexing notes in ${name}…`);
+    try {
+      await request(projectUrl(project) + "/index?run_in_background=false", "POST");
+    } catch (error) {
+      showNotice(`Project added. The notes could not be indexed yet. ${error.message}`, true);
+      return;
+    }
+    await selectProject(state.projects.find(entry => entry.external_id === project.external_id));
+    ui["projects-dialog"].close();
+    showNotice(`Project ${name} is ready.`);
   });
-  const project = projects.find(entry => entry.is_default) ?? projects[0];
-  ui.project.value = project.external_id;
-  await selectProject(project);
+});
+
+ui.project.addEventListener("change", () => {
+  const project = state.projects.find(entry => entry.external_id === ui.project.value);
+  ui.project.value = state.project?.external_id ?? "";
+  if (project && canLeave()) void run(() => selectProject(project));
+});
+
+void run(async () => {
+  await loadProjects();
+  const project = state.projects.find(entry => entry.is_default) ?? state.projects[0];
+  if (project) await selectProject(project);
+  else showNotice("Use Manage projects to add your first project.");
 });

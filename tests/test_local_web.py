@@ -30,6 +30,18 @@ def test_workspace_refuses_foreign_host_origin_and_unrelated_routes() -> None:
     assert client.get("/docs").status_code == 404
 
 
+def test_project_routes_require_same_origin_and_cannot_delete_files() -> None:
+    client = TestClient(create_web_app(8765), base_url=ORIGIN)
+    assert client.post("/v2/projects/").status_code == 403
+    assert client.put("/v2/projects/project/default").status_code == 403
+    assert client.delete("/v2/projects/project").status_code == 403
+    headers = {"Origin": ORIGIN}
+    assert (
+        client.delete("/v2/projects/project?delete_notes=true", headers=headers).status_code == 400
+    )
+    assert client.patch("/v2/projects/project", headers=headers).status_code == 404
+
+
 def test_preview_renders_markdown_and_escapes_active_html() -> None:
     client = TestClient(create_web_app(8765), base_url=ORIGIN)
     response = client.post(

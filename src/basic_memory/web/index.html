@@ -20,6 +20,7 @@
       </form>
       <label class="section-label" for="project">Project</label>
       <select id="project"></select>
+      <button id="manage-projects">Manage projects</button>
       <h2 class="section-label">Folders</h2>
       <nav id="folders" aria-label="Folders"></nav>
       <button id="refresh" class="refresh">Refresh workspace</button>
@@ -42,7 +43,7 @@
           <button id="save" class="primary" hidden>Save note</button>
         </div>
       </header>
-      <p id="notice" role="status" hidden></p>
+      <p id="notice" class="notice" role="status" hidden></p>
       <div class="document">
         <div id="empty"><h1>Your local notes</h1><p>Choose a note to read it or create a new one.</p></div>
         <div id="preview" class="preview" hidden></div>
@@ -55,5 +56,25 @@
       </div>
     </main>
   </div>
+  <dialog id="projects-dialog" aria-labelledby="projects-heading">
+    <header class="projects-header">
+      <div>
+        <h1 id="projects-heading">Projects</h1>
+        <p>Each project keeps its notes in a separate Markdown folder.</p>
+      </div>
+      <button id="close-projects" type="button">Close</button>
+    </header>
+    <p id="project-notice" class="notice" role="status" hidden></p>
+    <ul id="project-list"></ul>
+    <form id="add-project" aria-labelledby="add-project-heading">
+      <h2 id="add-project-heading">Add a project</h2>
+      <label for="project-name">Name</label>
+      <input id="project-name" required maxlength="100" placeholder="e.g. Research">
+      <label for="project-folder">Local folder <span>(optional)</span></label>
+      <input id="project-folder" aria-describedby="folder-help" placeholder="~/basic-memory-projects/Research">
+      <p id="folder-help">Use the suggested folder or enter an existing folder to use its notes in place.</p>
+      <button class="primary" type="submit">Add project</button>
+    </form>
+  </dialog>
 </body>
 </html>

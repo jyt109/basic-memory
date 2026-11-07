@@ -19,7 +19,9 @@ PROJECT = r"/v2/projects/[^/]+"
 API_ROUTES = {
     "GET": re.compile(rf"/v2/projects/|{PROJECT}/(?:directory/tree|knowledge/entities/[^/]+)"),
     "QUERY": re.compile(rf"{PROJECT}/(?:search/|knowledge/links/resolve)"),
-    "POST": re.compile(rf"{PROJECT}/knowledge/write"),
+    "POST": re.compile(rf"/v2/projects/|{PROJECT}/(?:index|knowledge/write)"),
+    "PUT": re.compile(rf"{PROJECT}/default"),
+    "DELETE": re.compile(PROJECT),
 }
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
@@ -87,6 +89,10 @@ def create_web_app(port: int) -> FastAPI:
         allowed = API_ROUTES.get(request.method)
         if not workspace_route and (allowed is None or not allowed.fullmatch(path)):
             return Response(status_code=404)
+
+        # The browser may unregister a project. Core defaults to keeping its files.
+        if request.method == "DELETE" and request.url.query:
+            return Response(status_code=400)
 
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = CSP
