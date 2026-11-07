@@ -1,6 +1,9 @@
 """Loopback browser workspace for the local Basic Memory API."""
 
 import re
+from tempfile import NamedTemporaryFile
+from typing import Annotated
+from uuid import UUID
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,9 +12,10 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline import StateInline
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 
 from basic_memory.api.app import app as api_app
+from basic_memory.config import resolve_data_dir
 from basic_memory.file_utils import ParseError, remove_frontmatter
 from basic_memory.markdown.entity_parser import parse
 from basic_memory.runtime.note_content_responses import NOTE_CONTENT_BASE_CHECKSUM_HEADER
@@ -67,6 +71,10 @@ class EditorCheckResponse(BaseModel):
     editable: bool
 
 
+class ProjectLabel(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     async with api_app.router.lifespan_context(api_app):
@@ -97,10 +105,13 @@ def create_web_app(port: int) -> FastAPI:
             ("GET", "/app.css"),
             ("GET", "/app.js"),
             ("GET", "/editor.bundle.js"),
+            ("GET", "/project-labels"),
             ("POST", "/editor-check"),
             ("GET", "/favicon.svg"),
             ("POST", "/preview"),
         }
+        if request.method == "PUT" and re.fullmatch(r"/project-labels/[^/]+", path):
+            workspace_route = True
         allowed = API_ROUTES.get(request.method)
         if not workspace_route and (allowed is None or not allowed.fullmatch(path)):
             return Response(status_code=404)
@@ -139,6 +150,31 @@ def create_web_app(port: int) -> FastAPI:
         if path.is_file():
             return FileResponse(path, media_type="text/javascript")
         return Response(media_type="text/javascript")
+
+    @app.get("/project-labels")
+    async def project_labels() -> dict[str, str]:
+        directory = resolve_data_dir() / "web-project-labels"
+        return {
+            path.stem: path.read_text(encoding="utf-8")
+            for path in directory.glob("*.txt")
+            if not path.is_symlink() and path.is_file()
+        }
+
+    @app.put("/project-labels/{project_id}")
+    async def rename_project_label(project_id: UUID, label: ProjectLabel) -> ProjectLabel:
+        # Labels are scoped to the browser workspace. Existing project IDs and
+        # the names that MCP and wikilinks resolve stay in Basic Memory's config.
+        directory = resolve_data_dir() / "web-project-labels"
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with NamedTemporaryFile(dir=directory, delete=False, mode="w", encoding="utf-8") as file:
+            temp_path = Path(file.name)
+            try:
+                file.write(label.name)
+                file.close()
+                temp_path.replace(directory / f"{project_id}.txt")
+            finally:
+                temp_path.unlink(missing_ok=True)
+        return label
 
     @app.post("/editor-check")
     async def editor_check(data: EditorCheckRequest) -> EditorCheckResponse:

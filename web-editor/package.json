@@ -7,7 +7,9 @@
   },
   "dependencies": {
     "@tiptap/core": "3.33.0",
+    "@tiptap/extension-table": "3.33.0",
     "@tiptap/markdown": "3.33.0",
+    "@tiptap/pm": "3.33.0",
     "@tiptap/starter-kit": "3.33.0"
   },
   "devDependencies": {

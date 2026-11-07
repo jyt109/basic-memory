@@ -5,6 +5,8 @@ const ui = Object.fromEntries(
 );
 const state = {
   projects: [],
+  projectLabels: {},
+  projectNameDraft: null,
   trees: new Map(),
   collapsed: new Set(),
   project: null,
@@ -15,6 +17,7 @@ const state = {
   editing: false,
   view: "preview",
   baseline: "",
+  markdown: "",
   saveError: "",
   busy: false,
   query: "",
@@ -47,8 +50,8 @@ async function request(path, method = "GET", body, headers = {}) {
 function dirty() {
   return state.editing && (
     state.note
-      ? ui.markdown.value !== state.baseline
-      : Boolean(ui.title.value || ui.markdown.value)
+      ? state.markdown !== state.baseline
+      : Boolean(ui.title.value || state.markdown)
   );
 }
 
@@ -68,12 +71,12 @@ function showNotice(message = "", isError = false) {
 
 function updateControls() {
   for (const control of [
-    ui.cancel, ui.reload, ui.mode, ui["preview-mode"], ui.more, ui.title, ui.markdown,
+    ui.cancel, ui.reload, ui.more, ui.title,
     ...ui.formatting.querySelectorAll("button"),
-    ui.refresh, ui["manage-projects"], ui["close-projects"], ui["project-name"], ui["project-folder"],
+    ui.refresh, ui["new-project"], ui["manage-projects"], ui["close-projects"], ui["project-name"], ui["project-folder"],
     ui["add-project"].querySelector("button"),
     ...ui["project-list"].querySelectorAll("button"),
-    ...ui.folders.querySelectorAll("button"),
+    ...ui.folders.querySelectorAll("button, input"),
     ...ui["note-list"].querySelectorAll("button"),
   ]) {
     control.disabled = state.busy;
@@ -96,6 +99,7 @@ function updateControls() {
     needsSave ? (state.saveError ? "Save failed" : "Unsaved changes") : "Saved";
   if (ui["save-status"].textContent !== status) ui["save-status"].textContent = status;
   ui["save-status"].classList.toggle("error", Boolean(needsSave && state.saveError));
+  updateTableControls();
 }
 
 async function run(action, { saveBefore = false } = {}) {
@@ -178,7 +182,7 @@ function contextActions(target, anchor, actions) {
 function treeItem(project, node) {
   const root = !node;
   const folder = root || node.type === "directory";
-  const name = root ? project.name : node.title || node.name;
+  const name = root ? projectLabel(project) : node.title || node.name;
   const path = root ? "/" : node.directory_path;
   const tree = root ? state.trees.get(project.external_id) : node;
   const item = document.createElement("li");
@@ -245,7 +249,8 @@ function treeItem(project, node) {
       ["Delete note…", () => deleteNote(project, node), true],
     ];
   if (root) {
-    actions.push(["New project…", () => openProjects(true)]);
+    actions.push(["New project…", () => startProjectName()]);
+    actions.push(["Rename project…", () => startProjectName(project)]);
     if (!project.is_default) {
       actions.push(["Set as default", () => setDefaultProject(project)]);
     }
@@ -261,10 +266,105 @@ function treeItem(project, node) {
   return item;
 }
 
+function projectLabel(project) {
+  return state.projectLabels[project.external_id] || project.name;
+}
+
+function projectNameField() {
+  const draft = state.projectNameDraft;
+  const form = document.createElement("form");
+  form.className = "project-name-field";
+  const icon = document.createElement("span");
+  icon.className = "tree-icon";
+  icon.setAttribute("aria-hidden", "true");
+  const input = document.createElement("input");
+  input.placeholder = "Project name";
+  input.setAttribute("aria-label", "Project name");
+  input.maxLength = 100;
+  input.required = true;
+  input.value = draft.name;
+  input.addEventListener("input", () => { draft.name = input.value; });
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "×";
+  cancel.setAttribute("aria-label", "Cancel project name");
+  function cancelName() {
+    state.projectNameDraft = null;
+    renderTree();
+    updateControls();
+  }
+  cancel.addEventListener("click", cancelName);
+  input.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelName();
+    }
+  });
+  const confirm = document.createElement("button");
+  confirm.type = "submit";
+  confirm.textContent = "✓";
+  confirm.setAttribute("aria-label", "Confirm project name");
+  form.append(icon, input, confirm, cancel);
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    const name = draft.name.trim();
+    if (!name) return;
+    if (state.projects.some(project => project.external_id !== draft.project?.external_id
+      && projectLabel(project).toLowerCase() === name.toLowerCase())) {
+      showNotice("A project with that name already exists.", true);
+      input.focus();
+      return;
+    }
+    void run(async () => {
+      if (draft.project) {
+        await request("/project-labels/" + encodeURIComponent(draft.project.external_id), "PUT", { name });
+        state.projectLabels[draft.project.external_id] = name;
+        state.projectNameDraft = null;
+        renderProjects();
+        renderLists();
+      } else {
+        await addProject(name, suggestedFolder(name));
+      }
+    }, { saveBefore: !draft.project }).then(() => {
+      ui.folders.querySelector(".project-name-field input")?.focus();
+    });
+  });
+  return form;
+}
+
+function startProjectName(project = null) {
+  state.projectNameDraft = { project, name: project ? projectLabel(project) : "" };
+  renderTree();
+  updateControls();
+  const input = ui.folders.querySelector(".project-name-field input");
+  input.focus();
+  input.select();
+}
+
 function renderTree() {
+  const current = ui.folders.querySelector(".project-name-field input:focus");
   const list = document.createElement("ul");
-  for (const project of state.projects) list.append(treeItem(project, null));
+  for (const project of state.projects) {
+    const item = treeItem(project, null);
+    if (state.projectNameDraft?.project?.external_id === project.external_id) {
+      const row = document.createElement("div");
+      row.className = "tree-row";
+      row.append(projectNameField());
+      item.firstElementChild.replaceWith(row);
+    }
+    list.append(item);
+  }
+  if (state.projectNameDraft && !state.projectNameDraft.project) {
+    const item = document.createElement("li");
+    item.append(projectNameField());
+    list.append(item);
+  }
   ui.folders.replaceChildren(list);
+  if (current) {
+    const replacement = list.querySelector(".project-name-field input");
+    replacement?.focus();
+    replacement?.setSelectionRange(current.selectionStart, current.selectionEnd);
+  }
 }
 
 function allNotes(folder) {
@@ -292,10 +392,10 @@ function renderLists() {
   )).filter(isNote);
   if (!state.query) notes.sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name));
   ui["list-heading"].textContent = state.query ? "Search results" : (
-    state.folder === state.tree ? state.project.name : state.folder.name
+    state.folder === state.tree ? projectLabel(state.project) : state.folder.name
   );
   ui["list-detail"].textContent = state.query
-    ? `“${state.query}” in ${state.project.name}`
+    ? `“${state.query}” in ${projectLabel(state.project)}`
     : `${notes.length} ${notes.length === 1 ? "note" : "notes"}`;
   ui["note-list"].replaceChildren();
   if (!notes.length) {
@@ -335,52 +435,63 @@ function clearFormatted() {
   visualEditor = null;
 }
 
+function updateTableControls() {
+  const inTable = Boolean(visualEditor?.isActive("table"));
+  ui["table-actions"].hidden = !inTable;
+  ui.formatting.querySelector("[data-format=table]").disabled = state.busy || inTable;
+  ui.formatting.querySelector("[data-format=delete-row]").disabled =
+    state.busy || Boolean(visualEditor?.isActive("tableHeader"));
+}
+
 async function loadFormatted() {
   clearFormatted();
-  state.view = "source";
-  if (!window.BasicMemoryEditor) return;
+  state.view = "preview";
+  state.editing = false;
 
-  const original = ui.markdown.value;
+  const original = state.markdown;
   const frontmatter = /^(?:[ \t]*\n)*(?:\uFEFF)?---[ \t]*\n[\s\S]*?^---[ \t]*(?:\n|$)/m.exec(original);
   const prefix = frontmatter?.index === 0 ? frontmatter[0] : "";
   const body = original.slice(prefix.length);
   const leading = /^(?:[ \t]*\n)*/.exec(body)[0];
-  const trailing = body.endsWith("\n") ? "\n" : "";
-  // Keep raw blocks and link definitions in source, even when they render invisibly.
-  if (/<!--|^\s*::|^ {0,3}\[[^\]\n]+\]:/m.test(body)) {
-    showNotice("This note uses Markdown that needs source mode.");
-    return;
+  const trailing = /\n*$/.exec(body.slice(leading.length))[0];
+  const unsupported = /<!--|^\s*::|^ {0,3}\[[^\]\n]+\]:/m.test(body);
+  if (!unsupported && window.BasicMemoryEditor) {
+    try {
+      let canonical;
+      const editor = window.BasicMemoryEditor(ui["visual-content"], body, markdown => {
+        if (canonical === undefined) return;
+        // The editor can add an empty paragraph after a table on first focus.
+        markdown = markdown.replace(/\n+$/, "");
+        state.markdown = markdown === canonical
+          ? original
+          : prefix + leading + markdown + trailing;
+        updateControls();
+        queueAutosave();
+      }, updateTableControls);
+      visualEditor = editor;
+      canonical = editor.getMarkdown().replace(/\n+$/, "");
+      const { editable } = await request("/editor-check", "POST", {
+        original, frontmatter: prefix, roundtrip: canonical,
+      });
+      if (editable) {
+        state.view = "formatted";
+        state.editing = true;
+        return;
+      }
+    } catch {
+      // Rendering read-only also handles unavailable editor assets or validation.
+    }
   }
 
-  try {
-    let canonical;
-    const editor = window.BasicMemoryEditor(ui["visual-content"], body, markdown => {
-      if (canonical === undefined) return;
-      ui.markdown.value = markdown === canonical
-        ? original
-        : prefix + leading + markdown + trailing;
-      ui.markdown.dispatchEvent(new Event("input"));
-    });
-    visualEditor = editor;
-    canonical = editor.getMarkdown();
-    const { editable } = await request("/editor-check", "POST", {
-      original, frontmatter: prefix, roundtrip: canonical,
-    });
-    if (!editable) {
-      clearFormatted();
-      showNotice("This note uses Markdown that needs source mode.");
-      return;
-    }
-    state.view = "formatted";
-  } catch {
-    clearFormatted();
-    showNotice("Formatted editing is unavailable. You can edit the Markdown source.");
-  }
+  clearFormatted();
+  ui.preview.innerHTML = await request("/preview", "POST", { markdown: original });
+  showNotice(window.BasicMemoryEditor
+    ? "This note is read-only here because it contains unsupported formatting."
+    : "The formatted editor is unavailable.");
 }
 
 function focusEditor() {
-  if (state.view === "formatted") visualEditor?.commands.focus();
-  if (state.view === "source") ui.markdown.focus();
+  visualEditor?.commands.focus();
 }
 
 async function openNote(id) {
@@ -396,8 +507,8 @@ async function openNote(id) {
   state.saveError = "";
   state.editing = editable;
   state.view = "preview";
-  ui.markdown.value = note.content;
-  state.baseline = ui.markdown.value;
+  state.markdown = note.content.replace(/\r\n?/g, "\n");
+  state.baseline = state.markdown;
   if (editable) await loadFormatted();
   renderEditor();
   renderLists();
@@ -409,12 +520,8 @@ function renderEditor() {
   ui.empty.hidden = active;
   ui.preview.hidden = !active || state.view !== "preview";
   ui.visual.hidden = !active || state.view !== "formatted";
-  ui.source.hidden = !active || state.view !== "source";
   ui.title.hidden = !draft;
   ui["title-label"].hidden = !draft;
-  ui.mode.hidden = !draft && !state.note?.db_checksum;
-  ui.mode.textContent = state.view === "source" ? "Formatted" : "Markdown";
-  ui["preview-mode"].hidden = ui.mode.hidden || state.view === "preview";
   ui.cancel.hidden = !draft;
   ui.reload.hidden = !state.note;
   ui["note-path"].textContent = state.note?.file_path ?? (draft ? "New note" : "Workspace");
@@ -500,23 +607,10 @@ function openFolder(project, path) {
   }
 }
 
-function beginEdit() {
-  if (state.note && !state.note.db_checksum) return;
-  if (state.view !== "preview") {
-    focusEditor();
-    return;
-  }
-  void run(async () => {
-    await loadFormatted();
-    renderEditor();
-  }).then(focusEditor);
-}
-
 function openTreeNote(project, note, keepList = false) {
   const current = project.external_id === state.project?.external_id;
   if (current && note.external_id === state.note?.external_id) {
-    if (!state.saveError) showNotice();
-    beginEdit();
+    focusEditor();
     return;
   }
   void run(async () => {
@@ -546,7 +640,7 @@ function newNoteIn(project, path) {
     state.saveError = "";
     state.editing = true;
     ui.title.value = "";
-    ui.markdown.value = "";
+    state.markdown = "";
     await loadFormatted();
     renderEditor();
     renderLists();
@@ -563,7 +657,7 @@ function deleteNote(project, note) {
     const path = projectUrl(project) + "/knowledge/entities/" + encodeURIComponent(note.external_id);
     const revision = selected ? state.note : await request(path);
     if (!revision.db_checksum) throw new Error("The note revision could not be verified.");
-    if (!window.confirm(`Delete “${revision.title}” from ${project.name} and remove its Markdown file?`)) return;
+    if (!window.confirm(`Delete “${revision.title}” from ${projectLabel(project)} and remove its Markdown file?`)) return;
     try {
       const result = await request(path, "DELETE", undefined, {
         "x-bm-cloud-note-base-checksum": revision.db_checksum,
@@ -599,7 +693,7 @@ function setDefaultProject(project) {
   void run(async () => {
     await request(projectUrl(project) + "/default", "PUT");
     await loadProjects();
-    showNotice(`${project.name} is now the default project.`);
+    showNotice(`${projectLabel(project)} is now the default project.`);
   });
 }
 
@@ -608,18 +702,18 @@ function removeProject(project) {
     const nextStep = state.projects.length > 1
       ? "Set another project as default first."
       : "Add another project and make it the default first.";
-    showNotice(`“${project.name}” is the default project. ${nextStep}`, true);
+    showNotice(`“${projectLabel(project)}” is the default project. ${nextStep}`, true);
     return;
   }
   const current = project.external_id === state.project?.external_id;
   void run(async () => {
     if (current && !canDiscard()) return;
-    if (!window.confirm(`Remove ${project.name} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
+    if (!window.confirm(`Remove ${projectLabel(project)} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
     await request(projectUrl(project), "DELETE");
     state.trees.delete(project.external_id);
     await loadProjects();
     if (current) await selectProject(state.projects.find(entry => entry.is_default) ?? state.projects[0]);
-    showNotice(`${project.name} was removed. Its Markdown files were kept.`);
+    showNotice(`${projectLabel(project)} was removed. Its Markdown files were kept.`);
   });
 }
 
@@ -649,7 +743,7 @@ ui["tree-menu"].addEventListener("keydown", event => {
 async function saveNote() {
   const { note, draftFolder } = state;
   const title = note?.title ?? ui.title.value.trim();
-  const content = ui.markdown.value || (note ? "" : `# ${title}\n`);
+  const content = state.markdown || (note ? "" : `# ${title}\n`);
   const file = note?.file_path.split("/");
   const response = await request(projectUrl() + "/knowledge/write", "POST", {
     note: {
@@ -674,10 +768,10 @@ async function saveNote() {
   state.note = response.entity;
   state.draftFolder = null;
   // The saved snapshot is the baseline. Never replace the text the user is still typing.
-  state.baseline = note ? content : ui.markdown.value;
+  state.baseline = note ? content : state.markdown;
   if (!note) {
-    ui.markdown.value = state.note.content;
-    state.baseline = ui.markdown.value;
+    state.markdown = state.note.content.replace(/\r\n?/g, "\n");
+    state.baseline = state.markdown;
     if (state.view === "formatted") await loadFormatted();
   }
   renderEditor();
@@ -741,25 +835,6 @@ ui.refresh.addEventListener("click", () => void run(async () => {
   }
 }));
 ui["new-note"].addEventListener("click", () => newNoteIn(state.project, state.folder.directory_path));
-ui.mode.addEventListener("click", () => {
-  if (state.view === "source") {
-    void run(async () => {
-      await loadFormatted();
-      renderEditor();
-    }).then(focusEditor);
-  } else {
-    clearFormatted();
-    state.view = "source";
-    renderEditor();
-    focusEditor();
-  }
-});
-ui["preview-mode"].addEventListener("click", () => void run(async () => {
-  ui.preview.innerHTML = await request("/preview", "POST", { markdown: ui.markdown.value });
-  clearFormatted();
-  state.view = "preview";
-  renderEditor();
-}));
 ui.formatting.addEventListener("mousedown", event => {
   // Keep the document selection when a formatting button is clicked.
   if (event.target.closest("[data-format]")) event.preventDefault();
@@ -773,6 +848,12 @@ ui.formatting.addEventListener("click", event => {
   if (format === "italic") command.toggleItalic().run();
   if (format === "bullets") command.toggleBulletList().run();
   if (format === "numbers") command.toggleOrderedList().run();
+  if (format === "table") command.insertTable({ rows: 3, cols: 2, withHeaderRow: true }).run();
+  if (format === "row") command.addRowAfter().run();
+  if (format === "column") command.addColumnAfter().run();
+  if (format === "delete-row") command.deleteRow().run();
+  if (format === "delete-column") command.deleteColumn().run();
+  if (format === "delete-table") command.deleteTable().run();
 });
 ui.preview.addEventListener("click", event => {
   const link = event.target.closest("[data-wikilink]");
@@ -814,10 +895,6 @@ ui.save.addEventListener("click", () => {
   }
 });
 ui.title.addEventListener("input", updateControls);
-ui.markdown.addEventListener("input", () => {
-  updateControls();
-  queueAutosave();
-});
 window.addEventListener("beforeunload", event => {
   if (dirty() || saveInFlight) event.preventDefault();
 });
@@ -829,8 +906,11 @@ document.addEventListener("keydown", event => {
 });
 
 async function loadProjects(refresh = false) {
-  const { projects } = await request("/v2/projects/");
+  const [{ projects }, labels] = await Promise.all([
+    request("/v2/projects/"), request("/project-labels"),
+  ]);
   state.projects = projects;
+  state.projectLabels = labels;
   const current = projects.find(entry => entry.external_id === state.project?.external_id);
   if (current) state.project = current;
   await Promise.allSettled(projects
@@ -845,7 +925,7 @@ function projectButton(label, project, action) {
   const button = document.createElement("button");
   button.type = "button";
   button.textContent = label;
-  button.setAttribute("aria-label", `${label} ${project.name}`);
+  button.setAttribute("aria-label", `${label} ${projectLabel(project)}`);
   button.addEventListener("click", action);
   return button;
 }
@@ -857,7 +937,7 @@ function renderProjects() {
     row.className = "project-row";
     const details = document.createElement("div");
     details.className = "project-details";
-    const name = projectButton(project.name, project, () => {
+    const name = projectButton(projectLabel(project), project, () => {
       if (project.external_id === state.project?.external_id) {
         ui["projects-dialog"].close();
       } else {
@@ -901,19 +981,16 @@ function suggestedFolder(name) {
 ui["project-name"].addEventListener("input", () => {
   ui["project-folder"].placeholder = suggestedFolder(ui["project-name"].value.trim());
 });
-function openProjects(focusName = false) {
+function openProjects() {
   ui["projects-dialog"].showModal();
-  void run(async () => {
-    await loadProjects();
-  }).then(() => {
-    if (focusName) ui["project-name"].focus();
-  });
+  void run(loadProjects);
 }
 
-ui["manage-projects"].addEventListener("click", () => openProjects());
+ui["new-project"].addEventListener("click", () => startProjectName());
+ui["manage-projects"].addEventListener("click", openProjects);
 contextActions(ui["projects-toolbar"], ui["manage-projects"], [
-  ["New project…", () => openProjects(true)],
-  ["Manage projects", () => openProjects()],
+  ["New project…", () => startProjectName()],
+  ["Manage projects", openProjects],
 ]);
 ui["close-projects"].addEventListener("click", () => ui["projects-dialog"].close());
 ui["projects-dialog"].addEventListener("cancel", event => {
@@ -927,30 +1004,33 @@ ui["add-project"].addEventListener("submit", event => {
     showNotice("Enter a project name and a full local folder path.", true);
     return;
   }
-  void run(async () => {
-    const { new_project: project } = await request("/v2/projects/", "POST", {
-      name, path, set_default: state.projects.length === 0,
-    });
-    ui["add-project"].reset();
-    ui["project-folder"].placeholder = suggestedFolder("");
-    await loadProjects();
-    showNotice(`Indexing notes in ${name}…`);
-    try {
-      await request(projectUrl(project) + "/index?run_in_background=false", "POST");
-    } catch (error) {
-      showNotice(`Project added. The notes could not be indexed yet. ${error.message}`, true);
-      return;
-    }
-    await fetchTree(project);
-    await selectProject(state.projects.find(entry => entry.external_id === project.external_id));
-    ui["projects-dialog"].close();
-    showNotice(`Project ${name} is ready.`);
-  }, { saveBefore: true });
+  void run(() => addProject(name, path), { saveBefore: true });
 });
+
+async function addProject(name, path) {
+  const { new_project: project } = await request("/v2/projects/", "POST", {
+    name, path, set_default: state.projects.length === 0,
+  });
+  state.projectNameDraft = null;
+  ui["add-project"].reset();
+  ui["project-folder"].placeholder = suggestedFolder("");
+  await loadProjects();
+  showNotice(`Indexing notes in ${name}…`);
+  try {
+    await request(projectUrl(project) + "/index?run_in_background=false", "POST");
+  } catch (error) {
+    showNotice(`Project added. The notes could not be indexed yet. ${error.message}`, true);
+    return;
+  }
+  await fetchTree(project);
+  await selectProject(state.projects.find(entry => entry.external_id === project.external_id));
+  if (ui["projects-dialog"].open) ui["projects-dialog"].close();
+  showNotice(`Project ${name} is ready.`);
+}
 
 void run(async () => {
   await loadProjects();
   const project = state.projects.find(entry => entry.is_default) ?? state.projects[0];
   if (project) await selectProject(project);
-  else showNotice("Use Manage projects to add your first project.");
+  else showNotice("Use the plus button to add your first project.");
 });

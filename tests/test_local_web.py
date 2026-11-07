@@ -1,6 +1,9 @@
 """The browser workspace serves only the expected local origin and note endpoints."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 
 from basic_memory.web import create_web_app
 
@@ -112,3 +115,32 @@ def test_formatted_editor_preserves_frontmatter_and_note_semantics() -> None:
         headers=headers,
     )
     assert response.json() == {"editable": False}
+
+
+def test_project_display_labels_persist_without_touching_project_config(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path))
+    project_id = "39e91780-9d42-41e6-af40-e72372e72f64"
+    path = f"/project-labels/{project_id}"
+    client = TestClient(create_web_app(8765), base_url=ORIGIN)
+    assert client.put(path, json={"name": "Planning"}).status_code == 403
+    headers = {"Origin": ORIGIN}
+    assert client.put(path, json={"name": " "}, headers=headers).status_code == 422
+    assert client.put(path, json={"name": "  Planning  "}, headers=headers).json() == {
+        "name": "Planning"
+    }
+    fresh = TestClient(create_web_app(8765), base_url=ORIGIN)
+    assert fresh.get("/project-labels").json() == {project_id: "Planning"}
+    assert not (tmp_path / "config.json").exists()
+
+
+def test_formatted_editor_check_accepts_equivalent_markdown_tables() -> None:
+    client = TestClient(create_web_app(8765), base_url=ORIGIN)
+    original = "| Task | Status |\n| :--- | ---: |\n| A \\| B | Ready |"
+    roundtrip = "| Task    | Status |\n| :------ | -----: |\n| A \\| B | Ready  |"
+    assert client.post(
+        "/editor-check",
+        json={"original": original, "roundtrip": roundtrip},
+        headers={"Origin": ORIGIN},
+    ).json() == {"editable": True}

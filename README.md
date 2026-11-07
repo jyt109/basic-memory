@@ -189,10 +189,13 @@ uv run --no-sync basic-memory web
 
 Open [127.0.0.1:8765](http://127.0.0.1:8765) to browse local projects,
 search notes, follow wikilinks, and edit the same Markdown files your MCP
-client uses. Click a note to edit its formatted text. Use **Markdown** to edit
-frontmatter or syntax that requires source mode. Changes save automatically after
-you pause or switch notes. Right-click a project, folder, or note in the sidebar for actions.
-Use the plus button beside **Projects** to manage the project list.
+client uses. Click a note to edit its formatted text and tables. Changes save
+automatically after you pause or switch notes. Notes that use unsupported formatting
+open read-only to preserve the Markdown file.
+
+Use the plus button beside **Projects** to name a new project in the sidebar.
+Right-click a project to rename its display label. The folder path and project
+name used by MCP and existing links stay the same.
 The server listens only on the loopback interface. Pass
 `--port` to choose another local port.
 
