@@ -77,7 +77,7 @@ function updateControls() {
     control.disabled = state.busy;
   }
   for (const control of [
-    ui.search, ui["search-form"].querySelector("button"),
+    ui.search, ui["new-note"], ui["search-form"].querySelector("button"),
   ]) {
     control.disabled = state.busy || !state.project;
   }
@@ -975,6 +975,7 @@ ui.refresh.addEventListener("click", () => void run(async () => {
     if (state.query) await search(state.query);
   }
 }));
+ui["new-note"].addEventListener("click", () => newNoteIn(state.project, state.folder.directory_path));
 ui.formatting.addEventListener("mousedown", event => {
   // Keep the document selection when a formatting button is clicked.
   if (event.target.closest("[data-format]")) event.preventDefault();
