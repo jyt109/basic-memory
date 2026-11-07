@@ -40,12 +40,13 @@
           <button id="cancel" hidden>Cancel</button>
           <button id="reload" hidden>Reload note</button>
           <button id="mode" hidden>Edit Markdown</button>
-          <button id="save" class="primary" hidden>Save note</button>
+          <span id="save-status" role="status" hidden></span>
+          <button id="save" class="primary" hidden>Create note</button>
         </div>
       </header>
       <p id="notice" class="notice" role="status" hidden></p>
       <div class="document">
-        <div id="empty"><h1>Your local notes</h1><p>Choose a note to read it or create a new one.</p></div>
+        <div id="empty"><h1>Your local notes</h1><p>Choose a note to start editing.</p></div>
         <div id="preview" class="preview" hidden></div>
         <div id="source" hidden>
           <label id="title-label" for="title" hidden>Note title</label>

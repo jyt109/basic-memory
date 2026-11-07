@@ -15,6 +15,7 @@ const state = {
   editing: false,
   showSource: false,
   baseline: "",
+  saveError: "",
   busy: false,
   query: "",
   results: [],
@@ -51,7 +52,10 @@ function dirty() {
   );
 }
 
-function canLeave() {
+let saveTimer;
+let saveInFlight;
+
+function canDiscard() {
   return !dirty() || window.confirm("Discard unsaved changes to this note?");
 }
 
@@ -78,22 +82,38 @@ function updateControls() {
   ]) {
     control.disabled = state.busy || !state.project;
   }
-  ui.save.disabled = state.busy || !dirty() || (!state.note && !ui.title.value.trim());
+  const needsSave = dirty();
+  ui.save.disabled = state.busy || Boolean(saveInFlight) || !needsSave
+    || (!state.note && !ui.title.value.trim());
+  ui.save.hidden = state.draftFolder === null && !(needsSave && state.saveError);
+  ui.save.textContent = state.note ? "Retry save" : "Create note";
+  ui["save-status"].hidden = !state.note?.db_checksum;
+  const status = saveInFlight ? "Saving…" :
+    needsSave ? (state.saveError ? "Save failed" : "Unsaved changes") : "Saved";
+  if (ui["save-status"].textContent !== status) ui["save-status"].textContent = status;
+  ui["save-status"].classList.toggle("error", Boolean(needsSave && state.saveError));
 }
 
-async function run(action) {
+async function run(action, { saveBefore = false } = {}) {
   if (state.busy) return;
+  clearTimeout(saveTimer);
   state.busy = true;
   closeMenu();
   updateControls();
   showNotice();
   try {
+    await saveInFlight?.catch(() => {});
+    if (saveBefore) {
+      if (state.draftFolder !== null && !canDiscard()) return;
+      await flushAutosave();
+    }
     await action();
   } catch (error) {
     showNotice(error.message, true);
   } finally {
     state.busy = false;
     updateControls();
+    queueAutosave();
   }
 }
 
@@ -217,7 +237,7 @@ function treeItem(project, node) {
   const actions = folder
     ? [["New note", () => newNoteIn(project, path)]]
     : [
-      ["Edit note", () => openTreeNote(project, node, true)],
+      ["Edit note", open],
       ["Delete note…", () => deleteNote(project, node), true],
     ];
   if (root) {
@@ -292,11 +312,7 @@ function renderLists() {
     path.textContent = note.file_path;
     button.append(title, path);
     const project = state.project;
-    button.addEventListener("click", () => {
-      if (note.external_id !== state.note?.external_id && canLeave()) {
-        void run(() => openNote(note.external_id));
-      }
-    });
+    button.addEventListener("click", () => openTreeNote(project, note, true));
     contextActions(button, button, [
       ["Edit note", () => openTreeNote(project, note, true)],
       ["Delete note…", () => deleteNote(project, note), true],
@@ -311,12 +327,15 @@ function renderLists() {
 async function openNote(id) {
   const note = await request(projectUrl() + "/knowledge/entities/" + encodeURIComponent(id));
   if (typeof note.content !== "string") throw new Error("Markdown content is unavailable.");
-  const html = await request("/preview", "POST", { markdown: note.content });
+  const editable = Boolean(note.db_checksum);
+  if (!editable) {
+    ui.preview.innerHTML = await request("/preview", "POST", { markdown: note.content });
+  }
   state.note = note;
   state.draftFolder = null;
-  state.editing = false;
-  state.showSource = false;
-  ui.preview.innerHTML = html;
+  state.saveError = "";
+  state.editing = editable;
+  state.showSource = editable;
   ui.markdown.value = note.content;
   state.baseline = ui.markdown.value;
   renderEditor();
@@ -332,10 +351,9 @@ function renderEditor() {
   ui.title.hidden = !draft;
   ui["title-label"].hidden = !draft;
   ui.mode.hidden = !draft && !state.note?.db_checksum;
-  ui.mode.textContent = state.showSource ? "Preview" : "Edit Markdown";
-  ui.cancel.hidden = !state.editing;
+  ui.mode.textContent = state.showSource ? "Preview" : "Edit";
+  ui.cancel.hidden = !draft;
   ui.reload.hidden = !state.note;
-  ui.save.hidden = !state.editing;
   ui["note-path"].textContent = state.note?.file_path ?? (draft ? "New note" : "Workspace");
   updateControls();
 }
@@ -386,6 +404,7 @@ async function selectProject(project, noteId, folderPath = "/", openStart = true
   state.folder = findFolder(tree, folderPath) ?? tree;
   state.note = null;
   state.draftFolder = null;
+  state.saveError = "";
   state.editing = false;
   state.showSource = false;
   state.query = "";
@@ -412,44 +431,40 @@ function browseFolder(path) {
 function openFolder(project, path) {
   if (project.external_id === state.project?.external_id) {
     browseFolder(path);
-  } else if (canLeave()) {
-    void run(() => selectProject(project, null, path, path === "/"));
+  } else {
+    void run(() => selectProject(project, null, path, path === "/"), { saveBefore: true });
   }
 }
 
-function beginEdit(focus = true) {
+function beginEdit() {
+  if (state.note && !state.note.db_checksum) return;
   state.editing = true;
   state.showSource = true;
   renderEditor();
-  if (focus) ui.markdown.focus();
+  ui.markdown.focus();
 }
 
-function openTreeNote(project, note, edit = false) {
+function openTreeNote(project, note, keepList = false) {
   const current = project.external_id === state.project?.external_id;
   if (current && note.external_id === state.note?.external_id) {
-    showNotice();
-    if (edit) beginEdit();
+    if (!state.saveError) showNotice();
+    beginEdit();
     return;
   }
-  if (!canLeave()) return;
   void run(async () => {
     const path = "/" + note.file_path.split("/").slice(0, -1).join("/");
     if (current) {
-      state.folder = findFolder(state.tree, path) ?? state.tree;
-      state.query = "";
-      ui.search.value = "";
       await openNote(note.external_id);
+      if (!keepList) browseFolder(path);
     } else {
       await selectProject(project, note.external_id, path);
     }
-    if (edit) beginEdit(false);
-  }).then(() => {
-    if (edit && state.showSource && state.note?.external_id === note.external_id) ui.markdown.focus();
+  }, { saveBefore: true }).then(() => {
+    if (state.showSource && state.note?.external_id === note.external_id) ui.markdown.focus();
   });
 }
 
 function newNoteIn(project, path) {
-  if (!canLeave()) return;
   void run(async () => {
     if (project.external_id !== state.project?.external_id) {
       await selectProject(project, null, path, false);
@@ -460,13 +475,14 @@ function newNoteIn(project, path) {
     state.collapsed.delete(project.external_id + path);
     state.note = null;
     state.draftFolder = state.folder.directory_path;
+    state.saveError = "";
     state.editing = true;
     state.showSource = true;
     ui.title.value = "";
     ui.markdown.value = "";
     renderEditor();
     renderLists();
-  }).then(() => {
+  }, { saveBefore: true }).then(() => {
     if (state.draftFolder !== null) ui.title.focus();
   });
 }
@@ -474,8 +490,8 @@ function newNoteIn(project, path) {
 function deleteNote(project, note) {
   const current = project.external_id === state.project?.external_id;
   const selected = current && state.note?.external_id === note.external_id;
-  if (selected && !canLeave()) return;
   void run(async () => {
+    if (selected && !canDiscard()) return;
     const path = projectUrl(project) + "/knowledge/entities/" + encodeURIComponent(note.external_id);
     const revision = selected ? state.note : await request(path);
     if (!revision.db_checksum) throw new Error("The note revision could not be verified.");
@@ -527,9 +543,9 @@ function removeProject(project) {
     return;
   }
   const current = project.external_id === state.project?.external_id;
-  if (current && !canLeave()) return;
-  if (!window.confirm(`Remove ${project.name} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
   void run(async () => {
+    if (current && !canDiscard()) return;
+    if (!window.confirm(`Remove ${project.name} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
     await request(projectUrl(project), "DELETE");
     state.trees.delete(project.external_id);
     await loadProjects();
@@ -586,23 +602,54 @@ async function saveNote() {
   if (!["created", "updated"].includes(response.kind)) {
     throw new Error(errors[response.kind] || "The note was not saved.");
   }
-  // The accepted response is already committed. Keep the new revision even if the preview fails.
   state.note = response.entity;
   state.draftFolder = null;
-  ui.markdown.value = state.note.content;
-  state.baseline = ui.markdown.value;
+  // The saved snapshot is the baseline. Never replace the text the user is still typing.
+  state.baseline = note ? content : ui.markdown.value;
+  if (!note) {
+    ui.markdown.value = state.note.content;
+    state.baseline = ui.markdown.value;
+  }
   renderEditor();
-  const html = await request("/preview", "POST", { markdown: state.note.content });
-  state.editing = false;
-  state.showSource = false;
-  ui.preview.innerHTML = html;
-  renderEditor();
-  showNotice("Note saved.");
-  try {
-    await refreshTree();
-    if (state.query) await search(state.query);
-  } catch (error) {
-    showNotice(`Note saved. Could not refresh the note list. ${error.message}`, true);
+  if (!note || note.title !== state.note.title) {
+    try {
+      await refreshTree();
+      if (state.query) await search(state.query);
+    } catch (error) {
+      showNotice(`Note saved. Could not refresh the note list. ${error.message}`, true);
+    }
+  }
+}
+
+function startAutosave() {
+  if (saveInFlight) return saveInFlight;
+  state.saveError = "";
+  saveInFlight = saveNote().catch(error => {
+    state.saveError = error.message;
+    showNotice(error.message, true);
+    throw error;
+  }).finally(() => {
+    saveInFlight = null;
+    updateControls();
+    queueAutosave();
+  });
+  updateControls();
+  return saveInFlight;
+}
+
+function queueAutosave() {
+  clearTimeout(saveTimer);
+  if (!state.note?.db_checksum || !dirty() || state.busy || saveInFlight || state.saveError) return;
+  saveTimer = setTimeout(() => {
+    void startAutosave().catch(() => {});
+  }, 650);
+}
+
+async function flushAutosave() {
+  clearTimeout(saveTimer);
+  while (state.note && dirty()) {
+    if (state.saveError) throw new Error(state.saveError);
+    await startAutosave();
   }
 }
 
@@ -639,7 +686,7 @@ ui.preview.addEventListener("click", event => {
   const link = event.target.closest("[data-wikilink]");
   if (!link) return;
   event.preventDefault();
-  if (state.busy || !canLeave()) return;
+  if (state.busy) return;
   void run(async () => {
     const target = await request(projectUrl() + "/knowledge/links/resolve", "QUERY", {
       identifier: link.dataset.wikilink,
@@ -650,28 +697,36 @@ ui.preview.addEventListener("click", event => {
     if (!project || !isNote(target)) throw new Error("The link does not point to a local Markdown note.");
     if (project.external_id === state.project.external_id) await openNote(target.external_id);
     else await selectProject(project, target.external_id);
-  });
+  }, { saveBefore: true });
 });
 ui.cancel.addEventListener("click", () => {
-  if (!canLeave()) return;
+  if (!canDiscard()) return;
+  state.draftFolder = null;
+  state.editing = false;
+  state.showSource = false;
+  showNotice();
+  renderEditor();
+});
+ui.reload.addEventListener("click", () => void run(async () => {
+  if (canDiscard()) await openNote(state.note.external_id);
+}));
+ui.save.addEventListener("click", () => {
   if (state.note) {
-    void run(() => openNote(state.note.external_id));
-  } else {
-    state.draftFolder = null;
-    state.editing = false;
-    state.showSource = false;
     showNotice();
-    renderEditor();
+    void startAutosave().catch(() => {});
+  } else {
+    void run(saveNote).then(() => {
+      if (state.note && state.showSource) ui.markdown.focus();
+    });
   }
 });
-ui.reload.addEventListener("click", () => {
-  if (canLeave()) void run(() => openNote(state.note.external_id));
-});
-ui.save.addEventListener("click", () => void run(saveNote));
 ui.title.addEventListener("input", updateControls);
-ui.markdown.addEventListener("input", updateControls);
+ui.markdown.addEventListener("input", () => {
+  updateControls();
+  queueAutosave();
+});
 window.addEventListener("beforeunload", event => {
-  if (dirty()) event.preventDefault();
+  if (dirty() || saveInFlight) event.preventDefault();
 });
 document.addEventListener("keydown", event => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !state.busy) {
@@ -712,11 +767,11 @@ function renderProjects() {
     const name = projectButton(project.name, project, () => {
       if (project.external_id === state.project?.external_id) {
         ui["projects-dialog"].close();
-      } else if (canLeave()) {
+      } else {
         void run(async () => {
           await selectProject(project);
           ui["projects-dialog"].close();
-        });
+        }, { saveBefore: true });
       }
     });
     name.className = "project-name";
@@ -779,7 +834,6 @@ ui["add-project"].addEventListener("submit", event => {
     showNotice("Enter a project name and a full local folder path.", true);
     return;
   }
-  if (!canLeave()) return;
   void run(async () => {
     const { new_project: project } = await request("/v2/projects/", "POST", {
       name, path, set_default: state.projects.length === 0,
@@ -798,7 +852,7 @@ ui["add-project"].addEventListener("submit", event => {
     await selectProject(state.projects.find(entry => entry.external_id === project.external_id));
     ui["projects-dialog"].close();
     showNotice(`Project ${name} is ready.`);
-  });
+  }, { saveBefore: true });
 });
 
 void run(async () => {

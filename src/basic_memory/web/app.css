@@ -80,6 +80,8 @@ button:disabled { cursor: default; opacity: .55; }
 .preview table { border-collapse: collapse; display: block; overflow: auto; }
 .preview :is(td, th) { border: 1px solid var(--line); padding: 5px 9px; }
 .preview img { max-width: 100%; }
+#save-status { align-self: center; color: var(--muted); font-size: 12px; white-space: nowrap; }
+#save-status.error { color: #8b332b; }
 #title, textarea { display: block; width: 100%; }
 #title { margin: 5px 0 18px; }
 textarea { min-height: 52dvh; padding: 13px; resize: vertical; border: 1px solid var(--line); border-radius: 7px; font: 13px/1.65 ui-monospace, monospace; }
