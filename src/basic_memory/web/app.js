@@ -215,9 +215,8 @@ function treeItem(project, node) {
     : () => openTreeNote(project, node);
   label.addEventListener("click", open);
   const actions = folder
-    ? [["Open", open], ["New note", () => newNoteIn(project, path)]]
+    ? [["New note", () => newNoteIn(project, path)]]
     : [
-      ["Open note", open],
       ["Edit note", () => openTreeNote(project, node, true)],
       ["Delete note…", () => deleteNote(project, node), true],
     ];
@@ -225,8 +224,8 @@ function treeItem(project, node) {
     actions.push(["New project…", () => openProjects(true)]);
     if (!project.is_default) {
       actions.push(["Set as default", () => setDefaultProject(project)]);
-      actions.push(["Remove project…", () => removeProject(project), true]);
     }
+    actions.push(["Delete project…", () => removeProject(project), true]);
   }
   const more = document.createElement("button");
   more.className = "tree-action";
@@ -428,6 +427,7 @@ function beginEdit(focus = true) {
 function openTreeNote(project, note, edit = false) {
   const current = project.external_id === state.project?.external_id;
   if (current && note.external_id === state.note?.external_id) {
+    showNotice();
     if (edit) beginEdit();
     return;
   }
@@ -519,6 +519,13 @@ function setDefaultProject(project) {
 }
 
 function removeProject(project) {
+  if (project.is_default) {
+    const nextStep = state.projects.length > 1
+      ? "Set another project as default first."
+      : "Add another project and make it the default first.";
+    showNotice(`“${project.name}” is the default project. ${nextStep}`, true);
+    return;
+  }
   const current = project.external_id === state.project?.external_id;
   if (current && !canLeave()) return;
   if (!window.confirm(`Remove ${project.name} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
@@ -702,8 +709,18 @@ function renderProjects() {
     row.className = "project-row";
     const details = document.createElement("div");
     details.className = "project-details";
-    const name = document.createElement("strong");
-    name.textContent = project.name;
+    const name = projectButton(project.name, project, () => {
+      if (project.external_id === state.project?.external_id) {
+        ui["projects-dialog"].close();
+      } else if (canLeave()) {
+        void run(async () => {
+          await selectProject(project);
+          ui["projects-dialog"].close();
+        });
+      }
+    });
+    name.className = "project-name";
+    name.removeAttribute("aria-label");
     details.append(name);
     if (project.is_default) {
       const badge = document.createElement("span");
@@ -718,20 +735,10 @@ function renderProjects() {
 
     const actions = document.createElement("div");
     actions.className = "actions";
-    actions.append(projectButton("Open", project, () => {
-      if (project.external_id === state.project?.external_id) {
-        ui["projects-dialog"].close();
-      } else if (canLeave()) {
-        void run(async () => {
-          await selectProject(project);
-          ui["projects-dialog"].close();
-        });
-      }
-    }));
     if (!project.is_default) {
       actions.append(projectButton("Set default", project, () => setDefaultProject(project)));
-      actions.append(projectButton("Remove", project, () => removeProject(project)));
     }
+    actions.append(projectButton("Delete", project, () => removeProject(project)));
     row.append(details, actions);
     ui["project-list"].append(row);
   }
