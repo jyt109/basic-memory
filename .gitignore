@@ -70,3 +70,7 @@ claude-output
 /integrations/openclaw/dist/
 /integrations/openclaw/skills/
 /integrations/openclaw/*.tgz
+
+# Local browser editor build
+/web-editor/node_modules/
+/src/basic_memory/web/editor.bundle.js

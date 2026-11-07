@@ -110,3 +110,12 @@ textarea { min-height: 52dvh; padding: 13px; resize: vertical; border: 1px solid
 #add-project label { font-weight: 620; margin-top: 4px; }
 #add-project label span, #folder-help { font-size: 12px; font-weight: 400; }
 #add-project button { justify-self: start; margin-top: 8px; }
+
+#formatting { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 22px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+#formatting button { min-width: 32px; padding: 3px 7px; border-color: transparent; }
+#formatting button:hover:enabled { background: var(--warm); }
+.visual-document { position: relative; min-height: 48dvh; overflow-wrap: anywhere; white-space: pre-wrap; outline: none; }
+.visual-document:focus-visible { outline: none; }
+.visual-document li > p { margin-bottom: 0; }
+.visual-document p:has(> br:only-child) { min-height: 1em; }
+.visual-wikilink { color: #215d91; background: #f0f5f9; border-radius: 3px; padding: 0 2px; }

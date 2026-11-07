@@ -76,3 +76,39 @@ def test_preview_keeps_unfinished_frontmatter_visible() -> None:
     )
     assert response.status_code == 200
     assert "title: Work in progress" in response.text
+
+
+def test_formatted_editor_preserves_frontmatter_and_note_semantics() -> None:
+    client = TestClient(create_web_app(8765), base_url=ORIGIN)
+    headers = {"Origin": ORIGIN}
+    prefix = "---\ntitle: Example\n---\n"
+    body = "# Heading\n\n**Emphasis**\n\n- [fact] An observation\n- links_to [[Target]]\n"
+    response = client.post(
+        "/editor-check",
+        json={
+            "original": prefix + body,
+            "frontmatter": prefix,
+            "roundtrip": body.replace("**", "__"),
+        },
+        headers=headers,
+    )
+    assert response.json() == {"editable": True}
+
+    for roundtrip in (body.replace("[fact]", r"\[fact\]"), "# Heading"):
+        response = client.post(
+            "/editor-check",
+            json={"original": prefix + body, "frontmatter": prefix, "roundtrip": roundtrip},
+            headers=headers,
+        )
+        assert response.json() == {"editable": False}
+
+    response = client.post(
+        "/editor-check",
+        json={
+            "original": "---\nHeading\n---\nBody",
+            "frontmatter": "---\nHeading\n---\n",
+            "roundtrip": "Body",
+        },
+        headers=headers,
+    )
+    assert response.json() == {"editable": False}

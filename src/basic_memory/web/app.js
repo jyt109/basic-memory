@@ -13,7 +13,7 @@ const state = {
   note: null,
   draftFolder: null,
   editing: false,
-  showSource: false,
+  view: "preview",
   baseline: "",
   saveError: "",
   busy: false,
@@ -68,7 +68,8 @@ function showNotice(message = "", isError = false) {
 
 function updateControls() {
   for (const control of [
-    ui.cancel, ui.reload, ui.mode, ui.more, ui.title, ui.markdown,
+    ui.cancel, ui.reload, ui.mode, ui["preview-mode"], ui.more, ui.title, ui.markdown,
+    ...ui.formatting.querySelectorAll("button"),
     ui.refresh, ui["manage-projects"], ui["close-projects"], ui["project-name"], ui["project-folder"],
     ui["add-project"].querySelector("button"),
     ...ui["project-list"].querySelectorAll("button"),
@@ -81,6 +82,9 @@ function updateControls() {
     ui.search, ui["new-note"], ui["search-form"].querySelector("button"),
   ]) {
     control.disabled = state.busy || !state.project;
+  }
+  if (visualEditor && visualEditor.isEditable === state.busy) {
+    visualEditor.setEditable(!state.busy, false);
   }
   const needsSave = dirty();
   ui.save.disabled = state.busy || Boolean(saveInFlight) || !needsSave
@@ -324,9 +328,65 @@ function renderLists() {
   updateControls();
 }
 
+let visualEditor;
+
+function clearFormatted() {
+  visualEditor?.destroy();
+  visualEditor = null;
+}
+
+async function loadFormatted() {
+  clearFormatted();
+  state.view = "source";
+  if (!window.BasicMemoryEditor) return;
+
+  const original = ui.markdown.value;
+  const frontmatter = /^(?:[ \t]*\n)*(?:\uFEFF)?---[ \t]*\n[\s\S]*?^---[ \t]*(?:\n|$)/m.exec(original);
+  const prefix = frontmatter?.index === 0 ? frontmatter[0] : "";
+  const body = original.slice(prefix.length);
+  const leading = /^(?:[ \t]*\n)*/.exec(body)[0];
+  const trailing = body.endsWith("\n") ? "\n" : "";
+  // Keep raw blocks and link definitions in source, even when they render invisibly.
+  if (/<!--|^\s*::|^ {0,3}\[[^\]\n]+\]:/m.test(body)) {
+    showNotice("This note uses Markdown that needs source mode.");
+    return;
+  }
+
+  try {
+    let canonical;
+    const editor = window.BasicMemoryEditor(ui["visual-content"], body, markdown => {
+      if (canonical === undefined) return;
+      ui.markdown.value = markdown === canonical
+        ? original
+        : prefix + leading + markdown + trailing;
+      ui.markdown.dispatchEvent(new Event("input"));
+    });
+    visualEditor = editor;
+    canonical = editor.getMarkdown();
+    const { editable } = await request("/editor-check", "POST", {
+      original, frontmatter: prefix, roundtrip: canonical,
+    });
+    if (!editable) {
+      clearFormatted();
+      showNotice("This note uses Markdown that needs source mode.");
+      return;
+    }
+    state.view = "formatted";
+  } catch {
+    clearFormatted();
+    showNotice("Formatted editing is unavailable. You can edit the Markdown source.");
+  }
+}
+
+function focusEditor() {
+  if (state.view === "formatted") visualEditor?.commands.focus();
+  if (state.view === "source") ui.markdown.focus();
+}
+
 async function openNote(id) {
   const note = await request(projectUrl() + "/knowledge/entities/" + encodeURIComponent(id));
   if (typeof note.content !== "string") throw new Error("Markdown content is unavailable.");
+  clearFormatted();
   const editable = Boolean(note.db_checksum);
   if (!editable) {
     ui.preview.innerHTML = await request("/preview", "POST", { markdown: note.content });
@@ -335,9 +395,10 @@ async function openNote(id) {
   state.draftFolder = null;
   state.saveError = "";
   state.editing = editable;
-  state.showSource = editable;
+  state.view = "preview";
   ui.markdown.value = note.content;
   state.baseline = ui.markdown.value;
+  if (editable) await loadFormatted();
   renderEditor();
   renderLists();
 }
@@ -346,12 +407,14 @@ function renderEditor() {
   const draft = state.draftFolder !== null;
   const active = Boolean(state.note || draft);
   ui.empty.hidden = active;
-  ui.preview.hidden = !active || state.showSource;
-  ui.source.hidden = !state.showSource;
+  ui.preview.hidden = !active || state.view !== "preview";
+  ui.visual.hidden = !active || state.view !== "formatted";
+  ui.source.hidden = !active || state.view !== "source";
   ui.title.hidden = !draft;
   ui["title-label"].hidden = !draft;
   ui.mode.hidden = !draft && !state.note?.db_checksum;
-  ui.mode.textContent = state.showSource ? "Preview" : "Edit";
+  ui.mode.textContent = state.view === "source" ? "Formatted" : "Markdown";
+  ui["preview-mode"].hidden = ui.mode.hidden || state.view === "preview";
   ui.cancel.hidden = !draft;
   ui.reload.hidden = !state.note;
   ui["note-path"].textContent = state.note?.file_path ?? (draft ? "New note" : "Workspace");
@@ -406,7 +469,8 @@ async function selectProject(project, noteId, folderPath = "/", openStart = true
   state.draftFolder = null;
   state.saveError = "";
   state.editing = false;
-  state.showSource = false;
+  state.view = "preview";
+  clearFormatted();
   state.query = "";
   ui.search.value = "";
   renderEditor();
@@ -438,10 +502,14 @@ function openFolder(project, path) {
 
 function beginEdit() {
   if (state.note && !state.note.db_checksum) return;
-  state.editing = true;
-  state.showSource = true;
-  renderEditor();
-  ui.markdown.focus();
+  if (state.view !== "preview") {
+    focusEditor();
+    return;
+  }
+  void run(async () => {
+    await loadFormatted();
+    renderEditor();
+  }).then(focusEditor);
 }
 
 function openTreeNote(project, note, keepList = false) {
@@ -460,7 +528,7 @@ function openTreeNote(project, note, keepList = false) {
       await selectProject(project, note.external_id, path);
     }
   }, { saveBefore: true }).then(() => {
-    if (state.showSource && state.note?.external_id === note.external_id) ui.markdown.focus();
+    if (state.note?.external_id === note.external_id) focusEditor();
   });
 }
 
@@ -477,9 +545,9 @@ function newNoteIn(project, path) {
     state.draftFolder = state.folder.directory_path;
     state.saveError = "";
     state.editing = true;
-    state.showSource = true;
     ui.title.value = "";
     ui.markdown.value = "";
+    await loadFormatted();
     renderEditor();
     renderLists();
   }, { saveBefore: true }).then(() => {
@@ -508,7 +576,8 @@ function deleteNote(project, note) {
     if (selected) {
       state.note = null;
       state.editing = false;
-      state.showSource = false;
+      state.view = "preview";
+      clearFormatted();
       renderEditor();
     }
     try {
@@ -609,6 +678,7 @@ async function saveNote() {
   if (!note) {
     ui.markdown.value = state.note.content;
     state.baseline = ui.markdown.value;
+    if (state.view === "formatted") await loadFormatted();
   }
   renderEditor();
   if (!note || note.title !== state.note.title) {
@@ -672,15 +742,37 @@ ui.refresh.addEventListener("click", () => void run(async () => {
 }));
 ui["new-note"].addEventListener("click", () => newNoteIn(state.project, state.folder.directory_path));
 ui.mode.addEventListener("click", () => {
-  if (state.showSource) {
+  if (state.view === "source") {
     void run(async () => {
-      ui.preview.innerHTML = await request("/preview", "POST", { markdown: ui.markdown.value });
-      state.showSource = false;
+      await loadFormatted();
       renderEditor();
-    });
+    }).then(focusEditor);
   } else {
-    beginEdit();
+    clearFormatted();
+    state.view = "source";
+    renderEditor();
+    focusEditor();
   }
+});
+ui["preview-mode"].addEventListener("click", () => void run(async () => {
+  ui.preview.innerHTML = await request("/preview", "POST", { markdown: ui.markdown.value });
+  clearFormatted();
+  state.view = "preview";
+  renderEditor();
+}));
+ui.formatting.addEventListener("mousedown", event => {
+  // Keep the document selection when a formatting button is clicked.
+  if (event.target.closest("[data-format]")) event.preventDefault();
+});
+ui.formatting.addEventListener("click", event => {
+  const format = event.target.closest("[data-format]")?.dataset.format;
+  if (!format || !visualEditor) return;
+  const command = visualEditor.chain().focus();
+  if (format === "heading") command.toggleHeading({ level: 2 }).run();
+  if (format === "bold") command.toggleBold().run();
+  if (format === "italic") command.toggleItalic().run();
+  if (format === "bullets") command.toggleBulletList().run();
+  if (format === "numbers") command.toggleOrderedList().run();
 });
 ui.preview.addEventListener("click", event => {
   const link = event.target.closest("[data-wikilink]");
@@ -703,7 +795,8 @@ ui.cancel.addEventListener("click", () => {
   if (!canDiscard()) return;
   state.draftFolder = null;
   state.editing = false;
-  state.showSource = false;
+  state.view = "preview";
+  clearFormatted();
   showNotice();
   renderEditor();
 });
@@ -716,7 +809,7 @@ ui.save.addEventListener("click", () => {
     void startAutosave().catch(() => {});
   } else {
     void run(saveNote).then(() => {
-      if (state.note && state.showSource) ui.markdown.focus();
+      if (state.note) focusEditor();
     });
   }
 });

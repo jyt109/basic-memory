@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from basic_memory.api.app import app as api_app
 from basic_memory.file_utils import ParseError, remove_frontmatter
+from basic_memory.markdown.entity_parser import parse
 from basic_memory.runtime.note_content_responses import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 
 ASSETS = Path(__file__).parent
@@ -56,6 +57,16 @@ class PreviewRequest(BaseModel):
     markdown: str
 
 
+class EditorCheckRequest(BaseModel):
+    original: str
+    frontmatter: str = ""
+    roundtrip: str
+
+
+class EditorCheckResponse(BaseModel):
+    editable: bool
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     async with api_app.router.lifespan_context(api_app):
@@ -85,6 +96,8 @@ def create_web_app(port: int) -> FastAPI:
             ("GET", "/"),
             ("GET", "/app.css"),
             ("GET", "/app.js"),
+            ("GET", "/editor.bundle.js"),
+            ("POST", "/editor-check"),
             ("GET", "/favicon.svg"),
             ("POST", "/preview"),
         }
@@ -119,6 +132,32 @@ def create_web_app(port: int) -> FastAPI:
     @app.get("/app.js")
     async def script() -> FileResponse:
         return FileResponse(ASSETS / "app.js", media_type="text/javascript")
+
+    @app.get("/editor.bundle.js")
+    async def editor_bundle() -> Response:
+        path = ASSETS / "editor.bundle.js"
+        if path.is_file():
+            return FileResponse(path, media_type="text/javascript")
+        return Response(media_type="text/javascript")
+
+    @app.post("/editor-check")
+    async def editor_check(data: EditorCheckRequest) -> EditorCheckResponse:
+        try:
+            body = remove_frontmatter(data.original, strip=False)
+        except ParseError:
+            return EditorCheckResponse(editable=False)
+        if data.frontmatter + body != data.original or MARKDOWN.render(body) != MARKDOWN.render(
+            data.roundtrip
+        ):
+            return EditorCheckResponse(editable=False)
+        original = parse(body)
+        roundtrip = parse(data.roundtrip)
+        return EditorCheckResponse(
+            editable=(
+                original.observations == roundtrip.observations
+                and original.relations == roundtrip.relations
+            )
+        )
 
     @app.get("/favicon.svg")
     async def favicon() -> FileResponse:

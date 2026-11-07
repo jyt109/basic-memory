@@ -182,13 +182,16 @@ From this fork's checkout, install the locked dependencies and start the workspa
 
 ```bash
 uv sync --locked --no-dev
+npm --prefix web-editor ci
+npm --prefix web-editor run build
 uv run --no-sync basic-memory web
 ```
 
 Open [127.0.0.1:8765](http://127.0.0.1:8765) to browse local projects,
 search notes, follow wikilinks, and edit the same Markdown files your MCP
-client uses. Click a note to edit it. Changes save automatically after you pause
-or switch notes. Right-click a project, folder, or note in the sidebar for actions.
+client uses. Click a note to edit its formatted text. Use **Markdown** to edit
+frontmatter or syntax that requires source mode. Changes save automatically after
+you pause or switch notes. Right-click a project, folder, or note in the sidebar for actions.
 Use the plus button beside **Projects** to manage the project list.
 The server listens only on the loopback interface. Pass
 `--port` to choose another local port.

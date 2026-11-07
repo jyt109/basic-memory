@@ -1,0 +1,16 @@
+{
+  "name": "basic-memory-local-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild editor.js --bundle --minify --outfile=../src/basic_memory/web/editor.bundle.js"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.33.0",
+    "@tiptap/markdown": "3.33.0",
+    "@tiptap/starter-kit": "3.33.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
