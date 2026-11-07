@@ -83,8 +83,6 @@ button:disabled { cursor: default; opacity: .55; }
 .preview img { max-width: 100%; }
 #save-status { align-self: center; color: var(--muted); font-size: 12px; white-space: nowrap; }
 #save-status.error { color: #8b332b; }
-#title { display: block; width: 100%; }
-#title { margin: 5px 0 18px; }
 @media (max-width: 760px) {
   .workspace { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); height: auto; min-height: 100dvh; }
   .sidebar, .notes { max-height: 44dvh; min-height: 215px; border-bottom: 1px solid var(--line); }
@@ -130,6 +128,6 @@ button:disabled { cursor: default; opacity: .55; }
 .visual-document :is(th, td)[data-align="center"] { text-align: center; }
 .visual-document .selectedCell { background: var(--warm); }
 
-.project-name-field { display: flex; align-items: center; gap: 4px; width: 100%; padding: 2px; }
-.project-name-field input { flex: 1; min-width: 0; padding: 3px 6px; }
-.project-name-field button { flex: 0 0 auto; min-width: 26px; padding: 2px 4px; }
+.inline-name-field { display: flex; align-items: center; gap: 4px; width: 100%; padding: 2px; }
+.inline-name-field input { flex: 1; min-width: 0; padding: 3px 6px; }
+.inline-name-field button { flex: 0 0 auto; min-width: 26px; padding: 2px 4px; }

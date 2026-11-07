@@ -144,3 +144,11 @@ def test_formatted_editor_check_accepts_equivalent_markdown_tables() -> None:
         json={"original": original, "roundtrip": roundtrip},
         headers={"Origin": ORIGIN},
     ).json() == {"editable": True}
+
+
+def test_note_rename_requires_origin_and_revision() -> None:
+    client = TestClient(create_web_app(8765), base_url=ORIGIN)
+    path = "/v2/projects/project/knowledge/entities/note"
+    data = {"operation": "rename", "content": "New title"}
+    assert client.patch(path, json=data).status_code == 403
+    assert client.patch(path, json=data, headers={"Origin": ORIGIN}).status_code == 428

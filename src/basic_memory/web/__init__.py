@@ -28,6 +28,7 @@ API_ROUTES = {
     "QUERY": re.compile(rf"{PROJECT}/(?:search/|knowledge/links/resolve)"),
     "POST": re.compile(rf"/v2/projects/|{PROJECT}/(?:index|knowledge/write)"),
     "PUT": re.compile(rf"{PROJECT}/default"),
+    "PATCH": re.compile(NOTE),
     "DELETE": re.compile(rf"{PROJECT}|{NOTE}"),
 }
 CSP = (
@@ -116,15 +117,15 @@ def create_web_app(port: int) -> FastAPI:
         if not workspace_route and (allowed is None or not allowed.fullmatch(path)):
             return Response(status_code=404)
 
-        if request.method == "DELETE":
-            # Unregistering a project must keep its files. A note delete must pin a revision.
-            if request.url.query:
-                return Response(status_code=400)
-            if (
-                re.fullmatch(NOTE, path)
-                and not request.headers.get(NOTE_CONTENT_BASE_CHECKSUM_HEADER, "").strip()
-            ):
-                return Response(status_code=428)
+        # Unregistering a project must keep its files.
+        if request.method == "DELETE" and request.url.query:
+            return Response(status_code=400)
+        if (
+            request.method in {"DELETE", "PATCH"}
+            and re.fullmatch(NOTE, path)
+            and not request.headers.get(NOTE_CONTENT_BASE_CHECKSUM_HEADER, "").strip()
+        ):
+            return Response(status_code=428)
 
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = CSP

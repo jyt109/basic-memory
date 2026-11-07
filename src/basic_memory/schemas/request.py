@@ -69,6 +69,7 @@ class EditEntityRequest(BaseModel):
         "append",
         "prepend",
         "find_replace",
+        "rename",
         "replace_section",
         "insert_before_section",
         "insert_after_section",
@@ -87,6 +88,16 @@ class EditEntityRequest(BaseModel):
     # semantics: provided keys overwrite existing values, unrelated keys and the body are
     # untouched. title/permalink are ignored — they have their own resolution paths.
     metadata: Optional[dict[str, Any]] = None
+
+    @field_validator("content")
+    @classmethod
+    def validate_rename_title(cls, value: str, info) -> str:
+        if info.data.get("operation") != "rename":
+            return value
+        title = value.strip()
+        if not title or len(title) > 100 or len(title.splitlines()) != 1:
+            raise ValueError("Enter a note title of 1 to 100 characters on a single line.")
+        return title
 
     @field_validator("section")
     @classmethod

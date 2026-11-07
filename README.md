@@ -194,8 +194,9 @@ automatically after you pause or switch notes. Notes that use unsupported format
 open read-only to preserve the Markdown file.
 
 Use the plus button beside **Projects** to name a new project in the sidebar.
-Right-click a project to rename its display label. The folder path and project
-name used by MCP and existing links stay the same.
+**New note** opens the same inline naming field under its project or folder.
+Right-click a project or note to rename it. Project display labels and note
+titles can change while existing paths and permalinks stay the same.
 The server listens only on the loopback interface. Pass
 `--port` to choose another local port.
 

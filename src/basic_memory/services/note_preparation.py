@@ -972,6 +972,22 @@ async def prepare_edit_entity_content(
     session: AsyncSession | None = None,
 ) -> PreparedEntityWrite:
     file_path = Path(entity.file_path)
+    if operation == "rename":
+        permalink = entity.permalink or await resolve_permalink(
+            dependencies, file_path, skip_conflict_check=skip_conflict_check, session=session
+        )
+        renamed = rewrite_frontmatter_fields(
+            current_content, updates={"title": content, "permalink": permalink}
+        )
+        return await _build_prepared_write(
+            dependencies,
+            file_path=file_path,
+            markdown_content=renamed,
+            content_type=entity.content_type,
+            permalink=permalink,
+            preserved_created_at=entity.created_at,
+        )
+
     # Trigger: the documented metadata-only pattern is empty append/prepend plus metadata.
     # Why: an empty append still appends "\n" to a body without a trailing newline, so a
     # request advertised as frontmatter-only would mutate the body it promised to keep.
