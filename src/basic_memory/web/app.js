@@ -5,6 +5,8 @@ const ui = Object.fromEntries(
 );
 const state = {
   projects: [],
+  trees: new Map(),
+  collapsed: new Set(),
   project: null,
   tree: null,
   folder: null,
@@ -24,17 +26,19 @@ function projectUrl(project = state.project) {
   return "/v2/projects/" + encodeURIComponent(project.external_id);
 }
 
-async function request(path, method = "GET", body) {
+async function request(path, method = "GET", body, headers = {}) {
   const response = await fetch(path, {
     method,
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    headers: body === undefined ? headers : { ...headers, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const json = response.headers.get("content-type")?.includes("application/json");
   const data = await (json ? response.json() : response.text());
   if (!response.ok) {
     const detail = data?.detail;
-    throw new Error(typeof detail === "string" ? detail : `Request failed (${response.status}).`);
+    const error = new Error(typeof detail === "string" ? detail : `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
@@ -61,7 +65,7 @@ function showNotice(message = "", isError = false) {
 function updateControls() {
   for (const control of [
     ui.cancel, ui.reload, ui.mode, ui.more, ui.title, ui.markdown,
-    ui["manage-projects"], ui["close-projects"], ui["project-name"], ui["project-folder"],
+    ui.refresh, ui["manage-projects"], ui["close-projects"], ui["project-name"], ui["project-folder"],
     ui["add-project"].querySelector("button"),
     ...ui["project-list"].querySelectorAll("button"),
     ...ui.folders.querySelectorAll("button"),
@@ -70,7 +74,7 @@ function updateControls() {
     control.disabled = state.busy;
   }
   for (const control of [
-    ui.project, ui.refresh, ui.search, ui["new-note"], ui["search-form"].querySelector("button"),
+    ui.search, ui["new-note"], ui["search-form"].querySelector("button"),
   ]) {
     control.disabled = state.busy || !state.project;
   }
@@ -80,6 +84,7 @@ function updateControls() {
 async function run(action) {
   if (state.busy) return;
   state.busy = true;
+  closeMenu();
   updateControls();
   showNotice();
   try {
@@ -92,28 +97,151 @@ async function run(action) {
   }
 }
 
-function folderList(folders) {
-  const list = document.createElement("ul");
-  for (const folder of folders) {
-    const item = document.createElement("li");
+let menuAnchor;
+
+function closeMenu(restoreFocus = false) {
+  const menu = ui["tree-menu"];
+  if (menu.hidden) return;
+  menu.hidden = true;
+  menuAnchor?.setAttribute("aria-expanded", "false");
+  if (restoreFocus) menuAnchor?.focus();
+  menuAnchor = null;
+}
+
+function showMenu(anchor, actions, event) {
+  if (state.busy) return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeMenu();
+  const menu = ui["tree-menu"];
+  menu.replaceChildren(...actions.map(([label, action, danger]) => {
     const button = document.createElement("button");
-    button.className = "folder";
-    button.textContent = folder.directory_path === "/" ? "All notes" : folder.name;
-    if (state.folder.directory_path === folder.directory_path && !state.query) {
-      button.setAttribute("aria-current", "true");
-    }
+    button.textContent = label;
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    if (danger) button.className = "danger";
     button.addEventListener("click", () => {
-      state.folder = folder;
-      state.query = "";
-      ui.search.value = "";
-      renderLists();
+      closeMenu(true);
+      action();
     });
-    item.append(button);
-    const children = folder.children.filter(node => node.type === "directory");
-    if (children.length) item.append(folderList(children));
-    list.append(item);
+    return button;
+  }));
+  menuAnchor = anchor;
+  anchor.setAttribute("aria-expanded", "true");
+  menu.hidden = false;
+  const bounds = anchor.getBoundingClientRect();
+  const atPointer = event.type === "contextmenu" && (event.clientX || event.clientY);
+  menu.style.left = Math.max(4, Math.min(
+    atPointer ? event.clientX : bounds.left, innerWidth - menu.offsetWidth - 4,
+  )) + "px";
+  menu.style.top = Math.max(4, Math.min(
+    atPointer ? event.clientY : bounds.bottom, innerHeight - menu.offsetHeight - 4,
+  )) + "px";
+  menu.firstElementChild.focus();
+}
+
+function contextActions(target, anchor, actions) {
+  anchor.setAttribute("aria-haspopup", "menu");
+  anchor.setAttribute("aria-expanded", "false");
+  target.addEventListener("contextmenu", event => showMenu(anchor, actions, event));
+  target.addEventListener("keydown", event => {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      showMenu(anchor, actions, event);
+    }
+  });
+}
+
+function treeItem(project, node) {
+  const root = !node;
+  const folder = root || node.type === "directory";
+  const name = root ? project.name : node.title || node.name;
+  const path = root ? "/" : node.directory_path;
+  const tree = root ? state.trees.get(project.external_id) : node;
+  const item = document.createElement("li");
+  const row = document.createElement("div");
+  row.className = "tree-row " + (root ? "tree-project" : folder ? "tree-folder" : "tree-note");
+  const label = document.createElement("button");
+  label.className = "tree-label";
+  label.title = name;
+  const icon = document.createElement("i");
+  icon.className = "tree-icon";
+  icon.setAttribute("aria-hidden", "true");
+  const text = document.createElement("span");
+  text.textContent = name;
+  label.append(icon, text);
+  const current = project.external_id === state.project?.external_id;
+  if (root && current) row.classList.add("tree-active-project");
+  const selected = folder
+    ? state.folder?.directory_path === path && !state.note && !state.query
+    : state.note?.external_id === node.external_id;
+  if (current && selected) label.setAttribute("aria-current", "true");
+
+  const children = folder ? tree?.children.filter(child => child.type === "directory" || isNote(child)) : [];
+  if (children?.length) {
+    const list = document.createElement("ul");
+    for (const child of children) list.append(treeItem(project, child));
+    const toggle = document.createElement("button");
+    toggle.className = "tree-toggle";
+    const key = project.external_id + path;
+    function updateBranch() {
+      const closed = state.collapsed.has(key);
+      list.hidden = closed;
+      toggle.textContent = closed ? "▸" : "▾";
+      toggle.setAttribute("aria-expanded", String(!closed));
+      toggle.setAttribute("aria-label", (closed ? "Expand " : "Collapse ") + name);
+    }
+    toggle.addEventListener("click", () => {
+      if (!state.collapsed.delete(key)) state.collapsed.add(key);
+      updateBranch();
+    });
+    updateBranch();
+    row.append(toggle);
+    item.append(row, list);
+  } else {
+    const spacer = document.createElement("span");
+    spacer.className = "tree-spacer";
+    row.append(spacer);
+    item.append(row);
+    if (root && !tree) {
+      const unavailable = document.createElement("p");
+      unavailable.className = "tree-unavailable";
+      unavailable.textContent = "Notes unavailable";
+      item.append(unavailable);
+    }
   }
-  return list;
+
+  const open = folder
+    ? () => openFolder(project, path)
+    : () => openTreeNote(project, node);
+  label.addEventListener("click", open);
+  const actions = folder
+    ? [["Open", open], ["New note", () => newNoteIn(project, path)]]
+    : [
+      ["Open note", open],
+      ["Edit note", () => openTreeNote(project, node, true)],
+      ["Delete note…", () => deleteNote(project, node), true],
+    ];
+  if (root) {
+    actions.push(["New project…", () => openProjects(true)]);
+    if (!project.is_default) {
+      actions.push(["Set as default", () => setDefaultProject(project)]);
+      actions.push(["Remove project…", () => removeProject(project), true]);
+    }
+  }
+  const more = document.createElement("button");
+  more.className = "tree-action";
+  more.textContent = "⋯";
+  more.setAttribute("aria-label", "Actions for " + name);
+  more.addEventListener("click", event => showMenu(more, actions, event));
+  contextActions(row, more, actions);
+  row.append(label, more);
+  return item;
+}
+
+function renderTree() {
+  const list = document.createElement("ul");
+  for (const project of state.projects) list.append(treeItem(project, null));
+  ui.folders.replaceChildren(list);
 }
 
 function allNotes(folder) {
@@ -127,14 +255,21 @@ function isNote(node) {
 }
 
 function renderLists() {
-  if (!state.folder) return;
-  ui.folders.replaceChildren(folderList([state.tree]));
+  renderTree();
+  if (!state.folder) {
+    ui["note-list"].replaceChildren();
+    ui["list-heading"].textContent = "Notes";
+    ui["list-detail"].textContent = "";
+    ui.more.hidden = true;
+    updateControls();
+    return;
+  }
   const notes = (state.query ? state.results : (
     state.folder === state.tree ? allNotes(state.tree) : state.folder.children
   )).filter(isNote);
   if (!state.query) notes.sort((a, b) => (a.title || a.name).localeCompare(b.title || b.name));
   ui["list-heading"].textContent = state.query ? "Search results" : (
-    state.folder === state.tree ? "All notes" : state.folder.name
+    state.folder === state.tree ? state.project.name : state.folder.name
   );
   ui["list-detail"].textContent = state.query
     ? `“${state.query}” in ${state.project.name}`
@@ -157,11 +292,16 @@ function renderLists() {
     path.className = "note-meta";
     path.textContent = note.file_path;
     button.append(title, path);
+    const project = state.project;
     button.addEventListener("click", () => {
       if (note.external_id !== state.note?.external_id && canLeave()) {
         void run(() => openNote(note.external_id));
       }
     });
+    contextActions(button, button, [
+      ["Edit note", () => openTreeNote(project, note, true)],
+      ["Delete note…", () => deleteNote(project, note), true],
+    ]);
     item.append(button);
     ui["note-list"].append(item);
   }
@@ -228,18 +368,23 @@ function findFolder(tree, path) {
 }
 
 async function refreshTree() {
-  const tree = await request(projectUrl() + "/directory/tree");
+  const tree = await fetchTree(state.project);
   state.folder = findFolder(tree, state.folder.directory_path) ?? tree;
   state.tree = tree;
   renderLists();
 }
 
-async function selectProject(project, noteId) {
+async function fetchTree(project) {
   const tree = await request(projectUrl(project) + "/directory/tree");
+  state.trees.set(project.external_id, tree);
+  return tree;
+}
+
+async function selectProject(project, noteId, folderPath = "/", openStart = true) {
+  const tree = state.trees.get(project.external_id) ?? await fetchTree(project);
   state.project = project;
-  ui.project.value = project.external_id;
   state.tree = tree;
-  state.folder = tree;
+  state.folder = findFolder(tree, folderPath) ?? tree;
   state.note = null;
   state.draftFolder = null;
   state.editing = false;
@@ -255,8 +400,159 @@ async function selectProject(project, noteId) {
   const start = allNotes(tree).find(note =>
     isNote(note) && /^(?:start-here|index)\.md$/i.test(note.file_path),
   );
-  if (start) await openNote(start.external_id);
+  if (openStart && start) await openNote(start.external_id);
 }
+
+function browseFolder(path) {
+  state.folder = findFolder(state.tree, path) ?? state.tree;
+  state.query = "";
+  ui.search.value = "";
+  renderLists();
+}
+
+function openFolder(project, path) {
+  if (project.external_id === state.project?.external_id) {
+    browseFolder(path);
+  } else if (canLeave()) {
+    void run(() => selectProject(project, null, path, path === "/"));
+  }
+}
+
+function beginEdit(focus = true) {
+  state.editing = true;
+  state.showSource = true;
+  renderEditor();
+  if (focus) ui.markdown.focus();
+}
+
+function openTreeNote(project, note, edit = false) {
+  const current = project.external_id === state.project?.external_id;
+  if (current && note.external_id === state.note?.external_id) {
+    if (edit) beginEdit();
+    return;
+  }
+  if (!canLeave()) return;
+  void run(async () => {
+    const path = "/" + note.file_path.split("/").slice(0, -1).join("/");
+    if (current) {
+      state.folder = findFolder(state.tree, path) ?? state.tree;
+      state.query = "";
+      ui.search.value = "";
+      await openNote(note.external_id);
+    } else {
+      await selectProject(project, note.external_id, path);
+    }
+    if (edit) beginEdit(false);
+  }).then(() => {
+    if (edit && state.showSource && state.note?.external_id === note.external_id) ui.markdown.focus();
+  });
+}
+
+function newNoteIn(project, path) {
+  if (!canLeave()) return;
+  void run(async () => {
+    if (project.external_id !== state.project?.external_id) {
+      await selectProject(project, null, path, false);
+    } else {
+      browseFolder(path);
+    }
+    state.collapsed.delete(project.external_id + "/");
+    state.collapsed.delete(project.external_id + path);
+    state.note = null;
+    state.draftFolder = state.folder.directory_path;
+    state.editing = true;
+    state.showSource = true;
+    ui.title.value = "";
+    ui.markdown.value = "";
+    renderEditor();
+    renderLists();
+  }).then(() => {
+    if (state.draftFolder !== null) ui.title.focus();
+  });
+}
+
+function deleteNote(project, note) {
+  const current = project.external_id === state.project?.external_id;
+  const selected = current && state.note?.external_id === note.external_id;
+  if (selected && !canLeave()) return;
+  void run(async () => {
+    const path = projectUrl(project) + "/knowledge/entities/" + encodeURIComponent(note.external_id);
+    const revision = selected ? state.note : await request(path);
+    if (!revision.db_checksum) throw new Error("The note revision could not be verified.");
+    if (!window.confirm(`Delete “${revision.title}” from ${project.name} and remove its Markdown file?`)) return;
+    try {
+      const result = await request(path, "DELETE", undefined, {
+        "x-bm-cloud-note-base-checksum": revision.db_checksum,
+      });
+      if (!result.deleted) throw new Error("The note could not be deleted.");
+    } catch (error) {
+      if (error.status === 409) throw new Error("The note changed. Reload it before deleting.");
+      throw error;
+    }
+    if (selected) {
+      state.note = null;
+      state.editing = false;
+      state.showSource = false;
+      renderEditor();
+    }
+    try {
+      if (current) {
+        await refreshTree();
+        if (state.query) await search(state.query);
+      } else {
+        await fetchTree(project);
+        renderLists();
+      }
+      showNotice("Note deleted.");
+    } catch (error) {
+      showNotice(`Note deleted. Could not refresh the note list. ${error.message}`, true);
+    }
+  });
+}
+
+function setDefaultProject(project) {
+  void run(async () => {
+    await request(projectUrl(project) + "/default", "PUT");
+    await loadProjects();
+    showNotice(`${project.name} is now the default project.`);
+  });
+}
+
+function removeProject(project) {
+  const current = project.external_id === state.project?.external_id;
+  if (current && !canLeave()) return;
+  if (!window.confirm(`Remove ${project.name} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
+  void run(async () => {
+    await request(projectUrl(project), "DELETE");
+    state.trees.delete(project.external_id);
+    await loadProjects();
+    if (current) await selectProject(state.projects.find(entry => entry.is_default) ?? state.projects[0]);
+    showNotice(`${project.name} was removed. Its Markdown files were kept.`);
+  });
+}
+
+document.addEventListener("pointerdown", event => {
+  if (!ui["tree-menu"].contains(event.target)) closeMenu();
+});
+window.addEventListener("resize", () => closeMenu(true));
+ui["tree-menu"].addEventListener("keydown", event => {
+  if (event.key === "Escape" || event.key === "Tab") {
+    closeMenu(true);
+    if (event.key === "Escape") event.preventDefault();
+    return;
+  }
+  if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const buttons = [...ui["tree-menu"].children];
+  const index = buttons.indexOf(document.activeElement);
+  const next = {
+    ArrowUp: (index + buttons.length - 1) % buttons.length,
+    ArrowDown: (index + 1) % buttons.length,
+    Home: 0,
+    End: buttons.length - 1,
+  }[event.key];
+  buttons[next].focus();
+});
 
 async function saveNote() {
   const { note, draftFolder } = state;
@@ -309,22 +605,18 @@ ui["search-form"].addEventListener("submit", event => {
 });
 ui.more.addEventListener("click", () => void run(() => search(state.query, state.page + 1)));
 ui.refresh.addEventListener("click", () => void run(async () => {
-  await refreshTree();
-  if (state.query) await search(state.query);
+  await loadProjects(true);
+  if (state.project && state.projects.some(project => project.external_id === state.project.external_id)) {
+    const tree = state.trees.get(state.project.external_id);
+    if (tree) {
+      state.folder = findFolder(tree, state.folder.directory_path) ?? tree;
+      state.tree = tree;
+      renderLists();
+    }
+    if (state.query) await search(state.query);
+  }
 }));
-ui["new-note"].addEventListener("click", () => {
-  if (!canLeave()) return;
-  showNotice();
-  state.note = null;
-  state.draftFolder = state.folder.directory_path;
-  state.editing = true;
-  state.showSource = true;
-  ui.title.value = "";
-  ui.markdown.value = "";
-  renderEditor();
-  renderLists();
-  ui.title.focus();
-});
+ui["new-note"].addEventListener("click", () => newNoteIn(state.project, state.folder.directory_path));
 ui.mode.addEventListener("click", () => {
   if (state.showSource) {
     void run(async () => {
@@ -333,10 +625,7 @@ ui.mode.addEventListener("click", () => {
       renderEditor();
     });
   } else {
-    state.editing = true;
-    state.showSource = true;
-    renderEditor();
-    ui.markdown.focus();
+    beginEdit();
   }
 });
 ui.preview.addEventListener("click", event => {
@@ -384,14 +673,17 @@ document.addEventListener("keydown", event => {
   }
 });
 
-async function loadProjects() {
+async function loadProjects(refresh = false) {
   const { projects } = await request("/v2/projects/");
   state.projects = projects;
   const current = projects.find(entry => entry.external_id === state.project?.external_id);
-  ui.project.replaceChildren(...projects.map(project => new Option(project.name, project.external_id)));
-  ui.project.value = current?.external_id ?? "";
   if (current) state.project = current;
+  await Promise.allSettled(projects
+    .filter(project => refresh || !state.trees.has(project.external_id))
+    .map(project => fetchTree(project)));
   renderProjects();
+  renderTree();
+  updateControls();
 }
 
 function projectButton(label, project, action) {
@@ -437,22 +729,8 @@ function renderProjects() {
       }
     }));
     if (!project.is_default) {
-      actions.append(projectButton("Set default", project, () => void run(async () => {
-        await request(projectUrl(project) + "/default", "PUT");
-        await loadProjects();
-        showNotice(`${project.name} is now the default project.`);
-      })));
-      actions.append(projectButton("Remove", project, () => {
-        const isCurrent = project.external_id === state.project?.external_id;
-        if (isCurrent && !canLeave()) return;
-        if (!window.confirm(`Remove ${project.name} from Basic Memory? The Markdown files will stay in ${project.path}.`)) return;
-        void run(async () => {
-          await request(projectUrl(project), "DELETE");
-          await loadProjects();
-          if (isCurrent) await selectProject(state.projects.find(entry => entry.is_default) ?? state.projects[0]);
-          showNotice(`${project.name} was removed. Its Markdown files were kept.`);
-        });
-      }));
+      actions.append(projectButton("Set default", project, () => setDefaultProject(project)));
+      actions.append(projectButton("Remove", project, () => removeProject(project)));
     }
     row.append(details, actions);
     ui["project-list"].append(row);
@@ -468,10 +746,20 @@ function suggestedFolder(name) {
 ui["project-name"].addEventListener("input", () => {
   ui["project-folder"].placeholder = suggestedFolder(ui["project-name"].value.trim());
 });
-ui["manage-projects"].addEventListener("click", () => {
+function openProjects(focusName = false) {
   ui["projects-dialog"].showModal();
-  void run(loadProjects);
-});
+  void run(async () => {
+    await loadProjects();
+  }).then(() => {
+    if (focusName) ui["project-name"].focus();
+  });
+}
+
+ui["manage-projects"].addEventListener("click", () => openProjects());
+contextActions(ui["projects-toolbar"], ui["manage-projects"], [
+  ["New project…", () => openProjects(true)],
+  ["Manage projects", () => openProjects()],
+]);
 ui["close-projects"].addEventListener("click", () => ui["projects-dialog"].close());
 ui["projects-dialog"].addEventListener("cancel", event => {
   if (state.busy) event.preventDefault();
@@ -499,16 +787,11 @@ ui["add-project"].addEventListener("submit", event => {
       showNotice(`Project added. The notes could not be indexed yet. ${error.message}`, true);
       return;
     }
+    await fetchTree(project);
     await selectProject(state.projects.find(entry => entry.external_id === project.external_id));
     ui["projects-dialog"].close();
     showNotice(`Project ${name} is ready.`);
   });
-});
-
-ui.project.addEventListener("change", () => {
-  const project = state.projects.find(entry => entry.external_id === ui.project.value);
-  ui.project.value = state.project?.external_id ?? "";
-  if (project && canLeave()) void run(() => selectProject(project));
 });
 
 void run(async () => {

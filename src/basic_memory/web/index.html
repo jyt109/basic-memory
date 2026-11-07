@@ -18,11 +18,11 @@
         <input type="search" id="search" placeholder="Search…" maxlength="4000">
         <button type="submit" aria-label="Search">Go</button>
       </form>
-      <label class="section-label" for="project">Project</label>
-      <select id="project"></select>
-      <button id="manage-projects">Manage projects</button>
-      <h2 class="section-label">Folders</h2>
-      <nav id="folders" aria-label="Folders"></nav>
+      <div id="projects-toolbar" class="tree-toolbar">
+        <h2 class="section-label">Projects</h2>
+        <button id="manage-projects" title="Manage projects" aria-label="Manage projects">+</button>
+      </div>
+      <nav id="folders" aria-label="Project tree"></nav>
       <button id="refresh" class="refresh">Refresh workspace</button>
     </aside>
     <section class="notes" aria-labelledby="list-heading">
@@ -56,6 +56,7 @@
       </div>
     </main>
   </div>
+  <div id="tree-menu" role="menu" aria-label="Actions" hidden></div>
   <dialog id="projects-dialog" aria-labelledby="projects-heading">
     <header class="projects-header">
       <div>

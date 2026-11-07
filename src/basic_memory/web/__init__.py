@@ -13,15 +13,17 @@ from pydantic import BaseModel
 
 from basic_memory.api.app import app as api_app
 from basic_memory.file_utils import ParseError, remove_frontmatter
+from basic_memory.runtime.note_content_responses import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 
 ASSETS = Path(__file__).parent
 PROJECT = r"/v2/projects/[^/]+"
+NOTE = rf"{PROJECT}/knowledge/entities/[^/]+"
 API_ROUTES = {
-    "GET": re.compile(rf"/v2/projects/|{PROJECT}/(?:directory/tree|knowledge/entities/[^/]+)"),
+    "GET": re.compile(rf"/v2/projects/|{PROJECT}/directory/tree|{NOTE}"),
     "QUERY": re.compile(rf"{PROJECT}/(?:search/|knowledge/links/resolve)"),
     "POST": re.compile(rf"/v2/projects/|{PROJECT}/(?:index|knowledge/write)"),
     "PUT": re.compile(rf"{PROJECT}/default"),
-    "DELETE": re.compile(PROJECT),
+    "DELETE": re.compile(rf"{PROJECT}|{NOTE}"),
 }
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
@@ -90,9 +92,15 @@ def create_web_app(port: int) -> FastAPI:
         if not workspace_route and (allowed is None or not allowed.fullmatch(path)):
             return Response(status_code=404)
 
-        # The browser may unregister a project. Core defaults to keeping its files.
-        if request.method == "DELETE" and request.url.query:
-            return Response(status_code=400)
+        if request.method == "DELETE":
+            # Unregistering a project must keep its files. A note delete must pin a revision.
+            if request.url.query:
+                return Response(status_code=400)
+            if (
+                re.fullmatch(NOTE, path)
+                and not request.headers.get(NOTE_CONTENT_BASE_CHECKSUM_HEADER, "").strip()
+            ):
+                return Response(status_code=428)
 
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = CSP

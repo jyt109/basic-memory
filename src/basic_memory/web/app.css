@@ -5,8 +5,8 @@
   background: #fff;
   --line: #e6e4de;
   --muted: #5f645c;
-  --warm: #f6eddd;
-  --accent: #9a5b16;
+  --warm: #e9eddf;
+  --accent: #526638;
 }
 * { box-sizing: border-box; }
 body, h1, h2, p { margin: 0; }
@@ -18,7 +18,7 @@ button:disabled { cursor: default; opacity: .55; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.workspace { display: grid; grid-template-columns: 218px minmax(240px, 28%) minmax(0, 1fr); height: 100dvh; }
+.workspace { display: grid; grid-template-columns: clamp(218px, 17vw, 280px) minmax(240px, 26%) minmax(0, 1fr); height: 100dvh; }
 .sidebar, .notes, .editor { min-width: 0; overflow: auto; }
 .sidebar { background: #f8f8f5; padding: 21px 14px; border-right: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 750; font-size: 15px; }
@@ -28,11 +28,29 @@ button:disabled { cursor: default; opacity: .55; }
 #search-form { display: flex; gap: 5px; margin-bottom: 22px; }
 #search { width: 100%; min-width: 0; }
 .section-label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 16px 0 6px; }
-#project { width: 100%; }
+.tree-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.tree-toolbar .section-label { margin: 0; }
+#manage-projects { padding: 0 6px; background: transparent; font-size: 16px; }
 #folders ul { list-style: none; padding: 0 0 0 11px; margin: 0; border-left: 1px solid var(--line); }
 #folders > ul { padding-left: 0; border: 0; }
-.folder { border-color: transparent; background: transparent; width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
-.folder[aria-current="true"] { background: #ebece5; font-weight: 650; }
+.tree-row { display: flex; align-items: center; gap: 1px; border-radius: 6px; min-width: 0; }
+.tree-row:hover, .tree-row:focus-within { background: #eeefe9; }
+.tree-active-project, .tree-row:has([aria-current="true"]) { background: #e5e9dd; }
+.tree-row button { background: transparent; border-color: transparent; padding: 4px 3px; min-height: 30px; }
+.tree-toggle, .tree-spacer { flex: 0 0 17px; }
+.tree-label { flex: 1; display: flex; align-items: center; gap: 6px; text-align: left; min-width: 0; }
+.tree-label span { overflow: hidden; text-overflow: ellipsis; }
+.tree-project .tree-label { font-weight: 680; }
+.tree-icon { flex: 0 0 auto; display: inline-block; border: 1.3px solid var(--muted); width: 12px; height: 9px; border-radius: 2px; }
+.tree-note .tree-icon { width: 9px; height: 12px; }
+.tree-action { opacity: 0; font-weight: 700; }
+.tree-row:hover .tree-action, .tree-row:focus-within .tree-action, .tree-action[aria-expanded="true"] { opacity: 1; }
+.tree-unavailable { color: var(--muted); padding: 3px 8px; font-size: 12px; }
+#tree-menu { position: fixed; z-index: 5; max-width: calc(100vw - 16px); min-width: 164px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 8px 22px #2223; }
+#tree-menu button { display: block; width: 100%; text-align: left; border-color: transparent; }
+#tree-menu button:hover, #tree-menu button:focus-visible { background: var(--warm); }
+#tree-menu .danger { color: #8b332b; }
+@media (hover: none) { .tree-action { opacity: 1; } }
 .refresh { margin-top: 18px; }
 .notes { border-right: 1px solid var(--line); background: #fcfcfa; }
 .list-header, .editor-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 66px; padding: 12px 17px; background: #fff; border-bottom: 1px solid var(--line); }
@@ -70,7 +88,6 @@ textarea { min-height: 52dvh; padding: 13px; resize: vertical; border: 1px solid
   .list-header { flex-wrap: wrap; }
 }
 
-#manage-projects { width: 100%; margin-top: 7px; text-align: left; }
 #projects-dialog { width: min(620px, calc(100% - 24px)); max-height: 88dvh; padding: 0; border: 1px solid var(--line); border-radius: 12px; color: inherit; box-shadow: 0 18px 70px #2224; }
 #projects-dialog::backdrop { background: #232a2370; }
 .projects-header { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 20px; border-bottom: 1px solid var(--line); }

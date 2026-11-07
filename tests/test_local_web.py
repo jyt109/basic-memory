@@ -42,6 +42,13 @@ def test_project_routes_require_same_origin_and_cannot_delete_files() -> None:
     assert client.patch("/v2/projects/project", headers=headers).status_code == 404
 
 
+def test_note_delete_requires_same_origin_and_a_revision() -> None:
+    client = TestClient(create_web_app(8765), base_url=ORIGIN)
+    path = "/v2/projects/project/knowledge/entities/note"
+    assert client.delete(path).status_code == 403
+    assert client.delete(path, headers={"Origin": ORIGIN}).status_code == 428
+
+
 def test_preview_renders_markdown_and_escapes_active_html() -> None:
     client = TestClient(create_web_app(8765), base_url=ORIGIN)
     response = client.post(
