@@ -26,7 +26,7 @@ NOTE = rf"{PROJECT}/knowledge/entities/[^/]+"
 API_ROUTES = {
     "GET": re.compile(rf"/v2/projects/|{PROJECT}/directory/tree|{NOTE}"),
     "QUERY": re.compile(rf"{PROJECT}/(?:search/|knowledge/links/resolve)"),
-    "POST": re.compile(rf"/v2/projects/|{PROJECT}/(?:index|knowledge/write)"),
+    "POST": re.compile(rf"/v2/projects/|{PROJECT}/(?:index|knowledge/(?:write|move-directory))"),
     "PUT": re.compile(rf"{PROJECT}/default"),
     "PATCH": re.compile(NOTE),
     "DELETE": re.compile(rf"{PROJECT}|{NOTE}"),

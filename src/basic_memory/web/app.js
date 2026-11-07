@@ -98,6 +98,7 @@ function updateControls() {
 async function run(action, { saveBefore = false } = {}) {
   if (state.busy) return;
   clearTimeout(saveTimer);
+  clearTimeout(openTimer);
   state.busy = true;
   closeMenu();
   updateControls();
@@ -128,6 +129,7 @@ function closeMenu(restoreFocus = false) {
 
 function showMenu(anchor, actions, event) {
   if (state.busy) return;
+  clearTimeout(openTimer);
   event.preventDefault();
   event.stopPropagation();
   closeMenu();
@@ -165,6 +167,28 @@ function contextActions(target, anchor, actions) {
   target.addEventListener("keydown", event => {
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       showMenu(anchor, actions, event);
+    }
+  });
+}
+
+let openTimer;
+
+function nameActions(button, open, rename) {
+  button.addEventListener("click", event => {
+    clearTimeout(openTimer);
+    if (event.detail === 0) open();
+    else if (event.detail === 1) {
+      // Keep the row mounted while the browser checks for a second click.
+      openTimer = setTimeout(open, 400);
+    } else if (event.detail === 2) {
+      rename();
+    }
+  });
+  button.addEventListener("keydown", event => {
+    if (event.key === "F2") {
+      event.preventDefault();
+      clearTimeout(openTimer);
+      rename();
     }
   });
 }
@@ -240,21 +264,26 @@ function treeItem(project, node) {
   const open = folder
     ? () => openFolder(project, path)
     : () => openTreeNote(project, node);
-  label.addEventListener("click", open);
+  const rename = root
+    ? () => startProjectName(project)
+    : folder ? () => startFolderRename(project, node) : () => startNoteRename(project, node);
+  nameActions(label, open, rename);
   const actions = folder
     ? [["New note", () => newNoteIn(project, path)]]
     : [
       ["Edit note", open],
-      ["Rename note…", () => startNoteRename(project, node)],
+      ["Rename note…", rename],
       ["Delete note…", () => deleteNote(project, node), true],
     ];
   if (root) {
     actions.push(["New project…", () => startProjectName()]);
-    actions.push(["Rename project…", () => startProjectName(project)]);
+    actions.push(["Rename project…", rename]);
     if (!project.is_default) {
       actions.push(["Set as default", () => setDefaultProject(project)]);
     }
     actions.push(["Delete project…", () => removeProject(project), true]);
+  } else if (folder) {
+    actions.push(["Rename folder…", rename]);
   }
   const more = document.createElement("button");
   more.className = "tree-action";
@@ -266,6 +295,8 @@ function treeItem(project, node) {
   if (
     (root && draft?.kind === "project" && draft.project?.external_id === project.external_id)
     || (!folder && draft?.kind === "note" && draft.note?.external_id === node.external_id)
+    || (!root && folder && draft?.kind === "folder"
+      && draft.project.external_id === project.external_id && draft.path === path)
   ) {
     const replacement = document.createElement("div");
     replacement.className = row.className;
@@ -281,14 +312,14 @@ function projectLabel(project) {
 
 function inlineNameField() {
   const draft = state.nameDraft;
-  const noun = draft.kind === "project" ? "project" : "note";
+  const noun = draft.kind;
   const form = document.createElement("form");
   form.className = "inline-name-field";
   const icon = document.createElement("span");
   icon.className = "tree-icon";
   icon.setAttribute("aria-hidden", "true");
   const input = document.createElement("input");
-  input.placeholder = noun === "project" ? "Project name" : "Note title";
+  input.placeholder = { project: "Project name", folder: "Folder name", note: "Note title" }[noun];
   input.setAttribute("aria-label", input.placeholder);
   input.maxLength = 100;
   input.required = true;
@@ -331,6 +362,8 @@ function inlineNameField() {
       if (draft.kind === "note") {
         if (draft.note) await renameNote(draft.project, draft.note, name);
         else await createNote(draft.project, draft.path, name);
+      } else if (draft.kind === "folder") {
+        await renameFolder(draft.project, draft.path, name);
       } else if (draft.project) {
         await request("/project-labels/" + encodeURIComponent(draft.project.external_id), "PUT", { name });
         state.projectLabels[draft.project.external_id] = name;
@@ -343,7 +376,7 @@ function inlineNameField() {
     }, {
       saveBefore: draft.kind === "note"
         ? !draft.note || state.note?.external_id === draft.note.external_id
-        : !draft.project,
+        : draft.kind === "folder" || !draft.project,
     }).then(() => {
       const remaining = ui.folders.querySelector(".inline-name-field input");
       if (remaining) remaining.focus();
@@ -354,6 +387,7 @@ function inlineNameField() {
 }
 
 function startInlineName(draft) {
+  clearTimeout(openTimer);
   state.nameDraft = draft;
   renderTree();
   updateControls();
@@ -432,7 +466,9 @@ function renderLists() {
     path.textContent = note.file_path;
     button.append(title, path);
     const project = state.project;
-    button.addEventListener("click", () => openTreeNote(project, note, true));
+    nameActions(
+      button, () => openTreeNote(project, note, true), () => startNoteRename(project, note),
+    );
     contextActions(button, button, [
       ["Edit note", () => openTreeNote(project, note, true)],
       ["Rename note…", () => startNoteRename(project, note)],
@@ -655,6 +691,57 @@ function startNoteRename(project, note) {
   const path = "/" + note.file_path.split("/").slice(0, -1).join("/");
   expandNoteFolder(project, path);
   startInlineName({ kind: "note", project, note, name: note.title || note.name });
+}
+
+function startFolderRename(project, folder) {
+  expandNoteFolder(project, folder.directory_path);
+  startInlineName({ kind: "folder", project, path: folder.directory_path, name: folder.name });
+}
+
+async function renameFolder(project, source, name) {
+  const parent = source.slice(0, source.lastIndexOf("/"));
+  const destination = parent + "/" + name;
+  if (destination === source) {
+    state.nameDraft = null;
+    renderLists();
+    return;
+  }
+  if (/[<>:"/\\|?*\x00-\x1f]/.test(name) || name === "." || name === "..") {
+    throw new Error("Enter a folder name without path separators or reserved characters.");
+  }
+  const tree = await fetchTree(project);
+  const siblings = findFolder(tree, parent || "/")?.children ?? [];
+  if (siblings.some(entry => entry.name.toLowerCase() === name.toLowerCase())) {
+    throw new Error("That name is already used in this folder. Choose a different name.");
+  }
+
+  const result = await request(projectUrl(project) + "/knowledge/move-directory", "POST", {
+    source_directory: source.slice(1),
+    destination_directory: destination.slice(1),
+  });
+  if (result.successful_moves > 0) state.nameDraft = null;
+  const updatedTree = await fetchTree(project);
+  expandNoteFolder(project, destination);
+  if (project.external_id === state.project?.external_id) {
+    const currentFolder = state.folder.directory_path;
+    const currentNote = state.note;
+    const renamedFolder = currentFolder === source || currentFolder.startsWith(source + "/")
+      ? destination + currentFolder.slice(source.length)
+      : currentFolder;
+    state.tree = updatedTree;
+    state.folder = findFolder(updatedTree, renamedFolder)
+      ?? findFolder(updatedTree, currentFolder) ?? updatedTree;
+    if (currentNote?.file_path.startsWith(source.slice(1) + "/")) {
+      await openNote(currentNote.external_id);
+    }
+    if (state.query) await search(state.query);
+  }
+  renderLists();
+  if (result.failed_moves > 0) {
+    showNotice(`Moved ${result.successful_moves} of ${result.total_files} files. ${result.errors[0]?.error ?? "Some files could not be moved."}`, true);
+  } else if (result.successful_moves === 0) {
+    showNotice("There were no indexed files to move.", true);
+  }
 }
 
 async function createNote(project, path, title) {

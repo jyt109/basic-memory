@@ -152,3 +152,13 @@ def test_note_rename_requires_origin_and_revision() -> None:
     data = {"operation": "rename", "content": "New title"}
     assert client.patch(path, json=data).status_code == 403
     assert client.patch(path, json=data, headers={"Origin": ORIGIN}).status_code == 428
+
+
+def test_folder_move_requires_same_origin() -> None:
+    client = TestClient(create_web_app(8765), base_url=ORIGIN)
+    path = "/v2/projects/project/knowledge/move-directory"
+    data = {"source_directory": "Research", "destination_directory": "Planning"}
+    assert client.post(path, json=data).status_code == 403
+    assert (
+        client.post(path, json=data, headers={"Origin": "https://other.example"}).status_code == 403
+    )

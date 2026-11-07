@@ -195,8 +195,9 @@ open read-only to preserve the Markdown file.
 
 Use the plus button beside **Projects** to name a new project in the sidebar.
 **New note** opens the same inline naming field under its project or folder.
-Right-click a project or note to rename it. Project display labels and note
-titles can change while existing paths and permalinks stay the same.
+Double-click a project, folder, or note name to rename it inline. Project
+display labels and note titles keep their existing paths and permalinks.
+Renaming a folder moves its indexed files to the new path.
 The server listens only on the loopback interface. Pass
 `--port` to choose another local port.
 
