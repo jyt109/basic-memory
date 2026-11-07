@@ -176,6 +176,20 @@ Unlimited notes, unlimited projects, every feature.
 Both paths use the same OSS engine and the same Markdown files. There's no
 lock-in either way — flip between them when your needs change.
 
+## Local browser workspace
+
+From this fork's checkout, install the locked dependencies and start the workspace:
+
+```bash
+uv sync --locked --no-dev
+uv run --no-sync basic-memory web
+```
+
+Open [127.0.0.1:8765](http://127.0.0.1:8765) to browse local projects,
+search notes, follow wikilinks, and edit the same Markdown files your MCP
+client uses. The server listens only on the loopback interface. Pass
+`--port` to choose another local port.
+
 ## Works with the tools you already use
 
 | Client | Transport | Notes |

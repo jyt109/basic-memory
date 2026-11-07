@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Basic Memory · Local workspace</title>
+  <link rel="icon" href="/favicon.svg">
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <div class="brand"><span class="brand-icon" aria-hidden="true">B</span> Basic Memory</div>
+      <div class="local"><span aria-hidden="true"></span> Local workspace</div>
+      <form id="search-form" role="search">
+        <label class="sr-only" for="search">Search project notes</label>
+        <input type="search" id="search" placeholder="Search…" maxlength="4000">
+        <button type="submit" aria-label="Search">Go</button>
+      </form>
+      <label class="section-label" for="project">Project</label>
+      <select id="project"></select>
+      <h2 class="section-label">Folders</h2>
+      <nav id="folders" aria-label="Folders"></nav>
+      <button id="refresh" class="refresh">Refresh workspace</button>
+    </aside>
+    <section class="notes" aria-labelledby="list-heading">
+      <header class="list-header">
+        <div><h2 id="list-heading">Notes</h2><div id="list-detail"></div></div>
+        <button id="new-note" class="primary" disabled>+ New note</button>
+      </header>
+      <ul id="note-list"></ul>
+      <button id="more" hidden>More results</button>
+    </section>
+    <main class="editor">
+      <header class="editor-header">
+        <span id="note-path">Workspace</span>
+        <div class="actions">
+          <button id="cancel" hidden>Cancel</button>
+          <button id="reload" hidden>Reload note</button>
+          <button id="mode" hidden>Edit Markdown</button>
+          <button id="save" class="primary" hidden>Save note</button>
+        </div>
+      </header>
+      <p id="notice" role="status" hidden></p>
+      <div class="document">
+        <div id="empty"><h1>Your local notes</h1><p>Choose a note to read it or create a new one.</p></div>
+        <div id="preview" class="preview" hidden></div>
+        <div id="source" hidden>
+          <label id="title-label" for="title" hidden>Note title</label>
+          <input id="title" placeholder="Give your note a title" hidden>
+          <label class="section-label" for="markdown">Markdown source</label>
+          <textarea id="markdown" spellcheck="false"></textarea>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
